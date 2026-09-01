@@ -6,6 +6,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import authRoutes from './routes/auth';
 import caseRoutes from './routes/cases';
+import activityRoutes from './routes/activities';
 
 dotenv.config();
 
@@ -18,6 +19,7 @@ const io = new Server(httpServer, { cors: { origin: '*' } });
 
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/cases', caseRoutes);
+app.use('/api/v1/cases', activityRoutes);
 app.get('/health', (_req, res) => {
     res.json({ status: 'ok' });
 });

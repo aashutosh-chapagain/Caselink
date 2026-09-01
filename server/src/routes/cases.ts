@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import CaseModel from '../models/Case';
+import Activity from '../models/Activity';
 import { requireAuth, AuthedRequest } from '../middleware/auth';
 
 const router = Router();
@@ -62,6 +63,39 @@ router.get('/:id', async (req: AuthedRequest, res) => {
     }
 
     res.json(found);
+});
+
+// PATCH /api/v1/cases/:id - update status
+router.patch('/:id', async (req: AuthedRequest, res) => {
+    const { status } = req.body;
+    const validStatuses = ['open', 'in_progress', 'closed'];
+    if (!validStatuses.includes(status)) {
+        return res.status(400).json({ error: 'Invalid status' });
+    }
+
+    const existing = await CaseModel.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
+    if (!existing) {
+        return res.status(404).json({ error: 'Case not found' });
+    }
+
+    const oldStatus = existing.status;
+
+    if (oldStatus === status) {
+        return res.json(existing);
+    }
+
+    existing.status = status;
+    await existing.save();
+
+    await Activity.create({
+        caseId: existing._id,
+        authorId: req.userId,
+        note: `Status changed from ${oldStatus} to ${status}`,
+        type: 'status_change',
+        workspaceId: req.workspaceId,
+    });
+
+    res.json(existing);
 });
 
 export default router;
