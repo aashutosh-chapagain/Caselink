@@ -46,6 +46,7 @@ router.post('/', async (req: AuthedRequest, res) => {
         workspaceId: req.workspaceId,
     });
 
+    req.app.get('io').to(`workspace:${req.workspaceId}`).emit('case:created', newCase);
     res.status(201).json(newCase);
 });
 
@@ -94,6 +95,9 @@ router.patch('/:id', async (req: AuthedRequest, res) => {
         type: 'status_change',
         workspaceId: req.workspaceId,
     });
+
+    console.log('Emitting case:updated to workspace:', req.workspaceId);
+    req.app.get('io').to(`workspace:${req.workspaceId}`).emit('case:updated', existing);
 
     res.json(existing);
 });

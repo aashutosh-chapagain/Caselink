@@ -51,7 +51,7 @@ router.post('/:caseId/activities', async (req: AuthedRequest, res) => {
     });
 
     const populated = await activity.populate('authorId', 'name email');
-
+    req.app.get('io').to(`workspace:${req.workspaceId}`).emit('activity:added', populated);
     res.status(201).json(populated);
 });
 
