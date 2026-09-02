@@ -50,6 +50,10 @@ Role logic:
 - `admin` — sees all cases in their workspace
 - `caseworker` — sees only cases where `assignedTo === userId`
 
+### Critical invariant
+
+Every new query, route, or feature touching Case, Activity, or Alert **must** filter by `workspaceId` derived from the verified JWT — never from the request body or query params. This is the sole authorization boundary in the app. Any code change that reads or writes these collections without this filter is a security bug, not a style issue.
+
 ### Server structure
 
 ```
@@ -93,6 +97,18 @@ The auth store token is read from `localStorage` on page load. The axios `client
 ### API base URL
 
 All authenticated API calls go through `client/src/api/client.ts`. The base URL comes from `VITE_API_URL` (set in `client/.env`). Public calls use `publicClient.ts` which shares the same base URL but no auth header.
+
+## Design notes
+
+The REST API is intentionally structured for reuse by a future React Native client (versioned routes, bearer-token auth, no cookie/session assumptions). Keep this in mind when adding new endpoints — avoid anything that only makes sense for a browser context.
+
+## Known gotchas
+
+- **TypeScript is pinned to ^5.7** in `server/`. TypeScript 7 broke `ts-node-dev`'s internal API, which is why this project uses `tsx` instead. Don't upgrade TypeScript without checking tsx compatibility first.
+- **Port 5000 is reserved by macOS AirPlay Receiver.** The server runs on 5001 for this reason — don't default back to 5000.
+- **Socket.IO event names use colons, not underscores** (`case:updated`, not `case_updated`). A client/server mismatch here fails silently — no error, the listener just never fires.
+- **Case status updates are a no-op if the new status matches the current one** — the PATCH handler returns early before creating an Activity log entry, to avoid meaningless "changed from X to X" audit entries.
+
 
 ## Seed Credentials
 
