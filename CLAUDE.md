@@ -85,11 +85,11 @@ client/src/
     auth.ts           # Pinia auth store — persists token + user to localStorage
   router/index.ts     # Route definitions; requiresAuth meta guard redirects to /login
   views/
-    LoginView.vue     # Login + register form
-    CaseListView.vue  # Filterable case list with real-time Socket.IO updates
-    CaseDetailView.vue # Case detail + activity timeline with real-time Socket.IO updates
-    DashboardView.vue  # (stub/WIP)
-    PublicAlertsView.vue # Unauthenticated alerts view
+    LoginView.vue     # Login form (no register UI; POST /auth/register exists on the server)
+    CaseListView.vue  # (stub/WIP — placeholder div)
+    CaseDetailView.vue # (stub/WIP — placeholder div)
+    DashboardView.vue  # (stub/WIP — placeholder div)
+    PublicAlertsView.vue # (stub/WIP — placeholder div; no auth guard)
 ```
 
 The auth store token is read from `localStorage` on page load. The axios `client.ts` interceptor always reads the latest token from the store, so no manual header management is needed in views.
@@ -104,7 +104,7 @@ The REST API is intentionally structured for reuse by a future React Native clie
 
 ## Known gotchas
 
-- **TypeScript is pinned to ^5.7** in `server/`. TypeScript 7 broke `ts-node-dev`'s internal API, which is why this project uses `tsx` instead. Don't upgrade TypeScript without checking tsx compatibility first.
+- **`server/` uses TypeScript `^5.9.3`, `client/` uses `~6.0.2`.** The project uses `tsx` instead of `ts-node-dev` because `ts-node-dev` has compatibility issues with newer TypeScript versions. Don't swap the runner without checking tsx compatibility first.
 - **Port 5000 is reserved by macOS AirPlay Receiver.** The server runs on 5001 for this reason — don't default back to 5000.
 - **Socket.IO event names use colons, not underscores** (`case:updated`, not `case_updated`). A client/server mismatch here fails silently — no error, the listener just never fires.
 - **Case status updates are a no-op if the new status matches the current one** — the PATCH handler returns early before creating an Activity log entry, to avoid meaningless "changed from X to X" audit entries.
