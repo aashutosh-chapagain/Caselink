@@ -66,6 +66,7 @@ server/src/
     auth.ts           # POST /register, POST /login (creates workspace if name is new)
     cases.ts          # CRUD under /api/v1/cases — emits case:created / case:updated via Socket.IO
     activities.ts     # GET/POST /api/v1/cases/:caseId/activities — emits activity:added
+    users.ts          # GET /api/v1/users — workspace-scoped user list (name, email, role); auth required
   scripts/
     seed.ts           # Demo data seeder (destructive — clears all collections)
     socket-test-client.ts  # Manual Socket.IO test harness
@@ -78,10 +79,12 @@ Socket.IO rooms: each connected socket joins `workspace:<workspaceId>` and `user
 ```
 client/src/
   main.ts             # App bootstrap: Pinia, Vue Router, mount
+  App.vue             # Root component — nav bar (name, role badge, logout) shown when authenticated
   api/
     client.ts         # Axios instance with auth interceptor (auto-attaches Bearer token, redirects to / on 401)
     publicClient.ts   # Axios instance without auth (for unauthenticated routes)
-    cases.ts          # Typed API functions: getCases, createCase, getCase, updateCaseStatus
+    cases.ts          # getCases, createCase, getCase, updateCase, getActivities, addActivity
+    users.ts          # getUsers() — returns WorkspaceUser[] for the reassign dropdown
     socket.ts         # Socket.IO factory — derives server URL from VITE_API_URL, passes JWT in handshake
   stores/
     auth.ts           # Pinia auth store — persists token + user to localStorage; exposes isAdmin getter
@@ -96,6 +99,17 @@ client/src/
 ```
 
 The auth store token is read from `localStorage` on page load. The axios `client.ts` interceptor always reads the latest token from the store, so no manual header management is needed in views.
+
+### Authentication and logout
+
+Logout is entirely client-side — the auth store is cleared, localStorage is wiped, and the user is redirected to `/`. The server uses stateless JWTs so there is nothing to invalidate server-side. The token remains cryptographically valid until its 7-day expiry but the client has no way to send it. A server-side token blacklist is not implemented; add one if forcible session revocation (e.g. admin deactivating an account) is required.
+
+### Case reassignment
+
+- Admin-only: server returns 403 if `assignedTo` is present in the PATCH body and `req.role !== 'admin'`
+- PATCH `/cases/:id` handles both `status` and `assignedTo` in a single request; each changed field creates its own Activity log entry
+- `case:updated` payload is fully populated (`assignedTo.name`, `createdBy.name`) before emitting
+- Reassign dropdown only renders when `authStore.isAdmin` is true; all workspace users are fetched in parallel with the case and activities on CaseDetailView mount
 
 ### CaseDetailView behaviour
 
