@@ -71,11 +71,16 @@ router.get('/:id', async (req: AuthedRequest, res) => {
     res.json(found);
 });
 
-// PATCH /api/v1/cases/:id - update status
+// PATCH /api/v1/cases/:id - update status and/or assignee
 router.patch('/:id', async (req: AuthedRequest, res) => {
-    const { status } = req.body;
+    const { status, assignedTo } = req.body;
+
+    if (assignedTo !== undefined && req.role !== 'admin') {
+        return res.status(403).json({ error: 'Only admins can reassign cases' });
+    }
+
     const validStatuses = ['open', 'in_progress', 'closed'];
-    if (!validStatuses.includes(status)) {
+    if (status !== undefined && !validStatuses.includes(status)) {
         return res.status(400).json({ error: 'Invalid status' });
     }
 
@@ -84,30 +89,59 @@ router.patch('/:id', async (req: AuthedRequest, res) => {
         return res.status(404).json({ error: 'Case not found' });
     }
 
-    const oldStatus = existing.status;
+    const activityLogs: Promise<any>[] = [];
 
-    if (oldStatus === status) {
+    if (status !== undefined && status !== existing.status) {
+        const oldStatus = existing.status;
+        existing.status = status;
+
+        activityLogs.push(
+            Activity.create({
+                caseId: existing._id,
+                authorId: req.userId,
+                note: `Status changed from ${oldStatus} to ${status}`,
+                type: 'status_change',
+                workspaceId: req.workspaceId,
+            })
+        );
+    }
+
+    if (assignedTo !== undefined && assignedTo !== existing.assignedTo?.toString()) {
+        existing.assignedTo = assignedTo;
+
+        activityLogs.push(
+            Activity.create({
+                caseId: existing._id,
+                authorId: req.userId,
+                note: `Case reassigned`,
+                type: 'assignment',
+                workspaceId: req.workspaceId,
+            })
+        );
+    }
+
+    if (activityLogs.length === 0) {
         return res.json(existing);
     }
 
-    existing.status = status;
     await existing.save();
 
-    const activity = await Activity.create({
-        caseId: existing._id,
-        authorId: req.userId,
-        note: `Status changed from ${oldStatus} to ${status}`,
-        type: 'status_change',
-        workspaceId: req.workspaceId,
-    });
+    const createdActivities = await Promise.all(activityLogs);
+    await Promise.all(
+        createdActivities.map(async (a) => {
+            const populated = await a.populate('authorId', 'name email');
+            req.app.get('io').to(`workspace:${req.workspaceId}`).emit('activity:added', populated);
+        })
+    );
 
-    const populatedActivity = await activity.populate('authorId', 'name email');
-    req.app.get('io').to(`workspace:${req.workspaceId}`).emit('activity:added', populatedActivity);
+    const populatedCase = await existing.populate([
+        { path: 'assignedTo', select: 'name email' },
+        { path: 'createdBy', select: 'name email' },
+    ]);
 
-    console.log('Emitting case:updated to workspace:', req.workspaceId);
-    req.app.get('io').to(`workspace:${req.workspaceId}`).emit('case:updated', existing);
+    req.app.get('io').to(`workspace:${req.workspaceId}`).emit('case:updated', populatedCase);
 
-    res.json(existing);
+    res.json(populatedCase);
 });
 
 export default router;

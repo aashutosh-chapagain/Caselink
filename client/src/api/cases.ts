@@ -38,8 +38,8 @@ export function getCase(id: string) {
     return client.get<Case>(`/cases/${id}`);
 }
 
-export function updateCaseStatus(id: string, status: Case['status']) {
-    return client.patch<Case>(`/cases/${id}`, { status });
+export function updateCase(id: string, patch: { status?: Case['status']; assignedTo?: string }) {
+    return client.patch<Case>(`/cases/${id}`, patch);
 }
 
 export interface Activity {

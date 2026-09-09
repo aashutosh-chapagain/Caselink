@@ -1,18 +1,24 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { getCase, updateCaseStatus, getActivities, addActivity, type Case, type Activity } from '../api/cases';
+import { getCase, updateCase, getActivities, addActivity, type Case, type Activity } from '../api/cases';
+import { getUsers, type WorkspaceUser } from '../api/users';
+import { useAuthStore } from '../stores/auth';
 import { createSocket } from '../api/socket';
 
 const route = useRoute();
 const router = useRouter();
 const id = route.params.id as string;
 
+const authStore = useAuthStore();
+
 const caseData = ref<Case | null>(null);
 const activities = ref<Activity[]>([]);
+const users = ref<WorkspaceUser[]>([]);
 const loading = ref(true);
 const error = ref('');
 const statusUpdating = ref(false);
+const reassigning = ref(false);
 const noteText = ref('');
 const noteSubmitting = ref(false);
 const noteError = ref('');
@@ -54,10 +60,21 @@ async function changeStatus(status: Case['status']) {
     if (!caseData.value || caseData.value.status === status) return;
     statusUpdating.value = true;
     try {
-        const res = await updateCaseStatus(id, status);
+        const res = await updateCase(id, { status });
         caseData.value = res.data;
     } finally {
         statusUpdating.value = false;
+    }
+}
+
+async function reassignCase(userId: string) {
+    if (!caseData.value || caseData.value.assignedTo?._id === userId) return;
+    reassigning.value = true;
+    try {
+        const res = await updateCase(id, { assignedTo: userId });
+        caseData.value = res.data;
+    } finally {
+        reassigning.value = false;
     }
 }
 
@@ -79,12 +96,14 @@ const socket = createSocket();
 
 onMounted(async () => {
     try {
-        const [caseRes, activitiesRes] = await Promise.all([
+        const [caseRes, activitiesRes, usersRes] = await Promise.all([
             getCase(id),
             getActivities(id),
+            getUsers(),
         ]);
         caseData.value = caseRes.data;
         activities.value = activitiesRes.data;
+        users.value = usersRes.data;
     } catch {
         error.value = 'Case not found or you do not have access.';
     } finally {
@@ -145,6 +164,17 @@ onUnmounted(() => {
                         <div>
                             <span class="text-slate-400">Assigned To</span>
                             <p class="text-slate-700 font-medium">{{ caseData.assignedTo?.name ?? '—' }}</p>
+                            <select
+                                v-if="authStore.isAdmin"
+                                :value="caseData.assignedTo?._id"
+                                :disabled="reassigning"
+                                @change="reassignCase(($event.target as HTMLSelectElement).value)"
+                                class="mt-1 w-full border border-slate-200 rounded-md px-2 py-1 text-sm text-slate-600 disabled:opacity-50"
+                            >
+                                <option v-for="u in users" :key="u._id" :value="u._id">
+                                    {{ u.name }} ({{ u.role }})
+                                </option>
+                            </select>
                         </div>
                         <div>
                             <span class="text-slate-400">Created By</span>
