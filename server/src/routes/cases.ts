@@ -93,13 +93,16 @@ router.patch('/:id', async (req: AuthedRequest, res) => {
     existing.status = status;
     await existing.save();
 
-    await Activity.create({
+    const activity = await Activity.create({
         caseId: existing._id,
         authorId: req.userId,
         note: `Status changed from ${oldStatus} to ${status}`,
         type: 'status_change',
         workspaceId: req.workspaceId,
     });
+
+    const populatedActivity = await activity.populate('authorId', 'name email');
+    req.app.get('io').to(`workspace:${req.workspaceId}`).emit('activity:added', populatedActivity);
 
     console.log('Emitting case:updated to workspace:', req.workspaceId);
     req.app.get('io').to(`workspace:${req.workspaceId}`).emit('case:updated', existing);

@@ -41,3 +41,22 @@ export function getCase(id: string) {
 export function updateCaseStatus(id: string, status: Case['status']) {
     return client.patch<Case>(`/cases/${id}`, { status });
 }
+
+export interface Activity {
+    _id: string;
+    caseId: string;
+    authorId: CaseUser | null;
+    note: string;
+    type: 'note' | 'status_change' | 'assignment';
+    workspaceId: string;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export function getActivities(caseId: string) {
+    return client.get<Activity[]>(`/cases/${caseId}/activities`);
+}
+
+export function addActivity(caseId: string, note: string) {
+    return client.post<Activity>(`/cases/${caseId}/activities`, { note });
+}
