@@ -46,8 +46,13 @@ router.post('/', async (req: AuthedRequest, res) => {
         workspaceId: req.workspaceId,
     });
 
-    req.app.get('io').to(`workspace:${req.workspaceId}`).emit('case:created', newCase);
-    res.status(201).json(newCase);
+    const populated = await newCase.populate([
+        { path: 'assignedTo', select: 'name email' },
+        { path: 'createdBy', select: 'name email' },
+    ]);
+
+    req.app.get('io').to(`workspace:${req.workspaceId}`).emit('case:created', populated);
+    res.status(201).json(populated);
 });
 
 // GET /api/v1/cases/:id - get one case (workspace-scoped)
