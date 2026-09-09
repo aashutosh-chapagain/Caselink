@@ -47,8 +47,8 @@ VITE_API_URL=http://localhost:5001/api/v1
 Every resource (Case, Activity, Alert) carries a `workspaceId` field. The JWT payload encodes `{ userId, workspaceId, role }`, and all API queries filter by `workspaceId` derived from the token — never from the request body. This is the primary authorization boundary.
 
 Role logic:
-- `admin` — sees all cases in their workspace
-- `caseworker` — sees only cases where `assignedTo === userId`
+- `admin` — sees all cases in workspace, can reassign cases, create/deactivate alerts
+- `caseworker` — sees only cases where `assignedTo === userId`; can create/update cases and add activity notes
 
 ### Critical invariant
 
@@ -81,18 +81,28 @@ client/src/
   api/
     client.ts         # Axios instance with auth interceptor (auto-attaches Bearer token, redirects to / on 401)
     publicClient.ts   # Axios instance without auth (for unauthenticated routes)
+    cases.ts          # Typed API functions: getCases, createCase, getCase, updateCaseStatus
+    socket.ts         # Socket.IO factory — derives server URL from VITE_API_URL, passes JWT in handshake
   stores/
-    auth.ts           # Pinia auth store — persists token + user to localStorage
+    auth.ts           # Pinia auth store — persists token + user to localStorage; exposes isAdmin getter
+    cases.ts          # Pinia cases store — cases[], loading, error; fetchCases / addCase / updateCase actions
   router/index.ts     # Route definitions; requiresAuth meta guard redirects to /login
   views/
-    LoginView.vue     # Login form (no register UI; POST /auth/register exists on the server)
-    CaseListView.vue  # (stub/WIP — placeholder div)
-    CaseDetailView.vue # (stub/WIP — placeholder div)
-    DashboardView.vue  # (stub/WIP — placeholder div)
+    LoginView.vue       # Login form — uses publicClient, stores token+user in auth store on success
+    CaseListView.vue    # Case list with status filter tabs, create modal, Socket.IO live updates
+    CaseDetailView.vue  # (stub/WIP — placeholder div)
+    DashboardView.vue   # (stub/WIP — placeholder div)
     PublicAlertsView.vue # (stub/WIP — placeholder div; no auth guard)
 ```
 
 The auth store token is read from `localStorage` on page load. The axios `client.ts` interceptor always reads the latest token from the store, so no manual header management is needed in views.
+
+### CaseListView behaviour
+
+- Fetches all cases once on mount (no status param); filters client-side by tab — instant switching, no extra API calls
+- Socket.IO connects on mount with JWT auth; listens for `case:created` (filtered by active tab) and `case:updated` (always patches in-place); disconnects on unmount
+- Create case modal is available to all authenticated users (both admin and caseworker)
+- `case:created` socket event carries fully populated `assignedTo` and `createdBy` (name + email) — same shape as GET response
 
 ### API base URL
 
@@ -108,6 +118,9 @@ The REST API is intentionally structured for reuse by a future React Native clie
 - **Port 5000 is reserved by macOS AirPlay Receiver.** The server runs on 5001 for this reason — don't default back to 5000.
 - **Socket.IO event names use colons, not underscores** (`case:updated`, not `case_updated`). A client/server mismatch here fails silently — no error, the listener just never fires.
 - **Case status updates are a no-op if the new status matches the current one** — the PATCH handler returns early before creating an Activity log entry, to avoid meaningless "changed from X to X" audit entries.
+- **`server/tsconfig.json` uses `module: commonjs` + `esModuleInterop: true`** — changed from the original `nodenext` because `nodenext` + `type: commonjs` in `package.json` caused TypeScript 5.9 to reject ESM import syntax. Do not switch back to `nodenext` without also changing `package.json` `type` to `module`.
+- **`case:created` socket payload is fully populated** — the POST route calls `.populate()` before emitting so `assignedTo.name` is available on the client. If you add new routes that create cases, remember to populate before emitting.
+- **Tab filtering is client-side** — `fetchCases()` in the cases store always fetches all cases with no status filter. The `?status=` query param on `GET /cases` still works for future use but is not called by the UI during tab switches.
 
 
 ## Seed Credentials
