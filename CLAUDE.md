@@ -90,12 +90,22 @@ client/src/
   views/
     LoginView.vue       # Login form — uses publicClient, stores token+user in auth store on success
     CaseListView.vue    # Case list with status filter tabs, create modal, Socket.IO live updates
-    CaseDetailView.vue  # (stub/WIP — placeholder div)
+    CaseDetailView.vue  # Case header, status buttons, activity timeline, add note form
     DashboardView.vue   # (stub/WIP — placeholder div)
     PublicAlertsView.vue # (stub/WIP — placeholder div; no auth guard)
 ```
 
 The auth store token is read from `localStorage` on page load. The axios `client.ts` interceptor always reads the latest token from the store, so no manual header management is needed in views.
+
+### CaseDetailView behaviour
+
+- Fetches case + activities in parallel via `Promise.all` on mount — one round trip
+- Status change buttons call `PATCH /cases/:id`; local state updated from server response (source of truth)
+- Socket.IO `case:updated` patches the case header live (status badge, etc.)
+- Socket.IO `activity:added` appends to the timeline — used for both note additions and status changes
+- Both socket listeners filter by `_id === id` / `caseId === id` to avoid cross-case pollution (all workspace events arrive on the same socket)
+- Add note form clears on success; socket handles appending — no manual push to activities array
+- `getActivities` and `addActivity` are in `client/src/api/cases.ts` (case-scoped routes, kept in same file)
 
 ### CaseListView behaviour
 
@@ -120,6 +130,8 @@ The REST API is intentionally structured for reuse by a future React Native clie
 - **Case status updates are a no-op if the new status matches the current one** — the PATCH handler returns early before creating an Activity log entry, to avoid meaningless "changed from X to X" audit entries.
 - **`server/tsconfig.json` uses `module: commonjs` + `esModuleInterop: true`** — changed from the original `nodenext` because `nodenext` + `type: commonjs` in `package.json` caused TypeScript 5.9 to reject ESM import syntax. Do not switch back to `nodenext` without also changing `package.json` `type` to `module`.
 - **`case:created` socket payload is fully populated** — the POST route calls `.populate()` before emitting so `assignedTo.name` is available on the client. If you add new routes that create cases, remember to populate before emitting.
+- **Status change emits two socket events** — `case:updated` (for the status badge) AND `activity:added` (for the timeline entry). Both must be emitted; missing one means either the badge or the timeline goes stale for other connected users.
+- **`activity:added` payload must have `authorId` populated** — both the activities POST route and the cases PATCH route call `.populate('authorId', 'name email')` before emitting. Raw ObjectId will silently show "System" in the timeline instead of the author name.
 - **Tab filtering is client-side** — `fetchCases()` in the cases store always fetches all cases with no status filter. The `?status=` query param on `GET /cases` still works for future use but is not called by the UI during tab switches.
 
 
