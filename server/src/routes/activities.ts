@@ -43,7 +43,7 @@ router.post('/:caseId/activities', async (req: AuthedRequest, res) => {
     }
 
     const activity = await Activity.create({
-        caseId: req.params.caseId,
+        caseId: req.params.caseId as string,
         authorId: req.userId,
         note,
         type: 'note',

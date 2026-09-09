@@ -7,26 +7,27 @@ export interface AuthedRequest extends Request {
     role?: 'admin' | 'caseworker';
 }
 
-export function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
-    const header = req.headers.authorization;
+export function requireAuth(req: Request, res: Response, next: NextFunction) {
+    const authedReq = req as AuthedRequest;
+    const header = authedReq.headers.authorization;
     if (!header || !header.startsWith('Bearer ')) {
         return res.status(401).json({ error: 'No token provided' });
     }
 
     try {
-        const token = header.split(' ')[1];
+        const token = header.slice(7);
         const payload = verifyToken(token);
-        req.userId = payload.userId;
-        req.workspaceId = payload.workspaceId;
-        req.role = payload.role;
+        authedReq.userId = payload.userId;
+        authedReq.workspaceId = payload.workspaceId;
+        authedReq.role = payload.role;
         next();
     } catch {
         return res.status(401).json({ error: 'Invalid or expired token' });
     }
 }
 
-export function requireAdmin(req: AuthedRequest, res: Response, next: NextFunction) {
-    if (req.role !== 'admin') {
+export function requireAdmin(req: Request, res: Response, next: NextFunction) {
+    if ((req as AuthedRequest).role !== 'admin') {
         return res.status(403).json({ error: 'Admin access required' });
     }
     next();
