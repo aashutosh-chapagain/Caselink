@@ -25,9 +25,13 @@ export interface CreateCasePayload {
     region: string;
 }
 
-export function getCases(status?: string) {
-    const params = status ? { status } : {};
-    return client.get<Case[]>('/cases', { params });
+export interface CasesResponse {
+    cases: Case[];
+    hasMore: boolean;
+}
+
+export function getCases(params?: { status?: string; cursor?: string; limit?: number }) {
+    return client.get<CasesResponse>('/cases', { params });
 }
 
 export function createCase(payload: CreateCasePayload) {
@@ -53,8 +57,13 @@ export interface Activity {
     updatedAt: string;
 }
 
-export function getActivities(caseId: string) {
-    return client.get<Activity[]>(`/cases/${caseId}/activities`);
+export interface ActivitiesResponse {
+    activities: Activity[];
+    hasMore: boolean;
+}
+
+export function getActivities(caseId: string, params?: { limit?: number; before?: string }) {
+    return client.get<ActivitiesResponse>(`/cases/${caseId}/activities`, { params });
 }
 
 export function addActivity(caseId: string, note: string) {

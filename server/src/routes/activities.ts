@@ -7,7 +7,7 @@ const router = Router();
 
 router.use(requireAuth);
 
-// GET /api/v1/cases/:caseId/activities - list activity for a case
+// GET /api/v1/cases/:caseId/activities - list activity for a case (paginated)
 router.get('/:caseId/activities', async (req: AuthedRequest, res) => {
     const caseExists = await CaseModel.findOne({
         _id: req.params.caseId,
@@ -17,14 +17,32 @@ router.get('/:caseId/activities', async (req: AuthedRequest, res) => {
         return res.status(404).json({ error: 'Case not found' });
     }
 
-    const activities = await Activity.find({
+    const { limit, before } = req.query as Record<string, string>;
+    const pageLimit = parseInt(limit) || 20;
+
+    const filter: Record<string, unknown> = {
         caseId: req.params.caseId,
         workspaceId: req.workspaceId,
-    })
-        .populate('authorId', 'name email')
-        .sort({ createdAt: 1 });
+    };
 
-    res.json(activities);
+    if (before) {
+        filter._id = { $lt: before };
+    }
+
+    const activities = await Activity.find(filter)
+        .populate('authorId', 'name email')
+        .sort({ createdAt: -1 })
+        .limit(pageLimit + 1);
+
+    let hasMore = false;
+    if (activities.length > pageLimit) {
+        hasMore = true;
+        activities.pop();
+    }
+
+    activities.reverse();
+
+    res.json({ activities, hasMore });
 });
 
 // POST /api/v1/cases/:caseId/activities - add a note

@@ -39,25 +39,30 @@ const tabs = [
 
 const activeTab = ref<string | undefined>(undefined);
 
-const filteredCases = computed(() =>
-    activeTab.value
-        ? casesStore.cases.filter(c => c.status === activeTab.value)
-        : casesStore.cases
+const displayedCases = computed(() => {
+    if (activeTab.value === 'closed') return casesStore.closedCases;
+    if (activeTab.value) return casesStore.activeCases.filter(c => c.status === activeTab.value);
+    return casesStore.activeCases;
+});
+
+const isLoading = computed(() =>
+    activeTab.value === 'closed' ? casesStore.closedLoading : casesStore.loading
 );
 
 function selectTab(value: string | undefined) {
     activeTab.value = value;
+    if (value === 'closed' && casesStore.closedCases.length === 0) {
+        casesStore.fetchClosedCases();
+    }
 }
 
 const socket = createSocket();
 
 onMounted(() => {
-    casesStore.fetchCases();
+    casesStore.fetchActiveCases();
 
     socket.on('case:created', (newCase: Case) => {
-        if (!activeTab.value || newCase.status === activeTab.value) {
-            casesStore.addCase(newCase);
-        }
+        casesStore.addCase(newCase);
     });
 
     socket.on('case:updated', (updated: Case) => {
@@ -124,7 +129,7 @@ function formatDate(iso: string) {
             </div>
 
             <!-- Loading -->
-            <div v-if="casesStore.loading" class="text-slate-500 text-sm">Loading cases...</div>
+            <div v-if="isLoading" class="text-slate-500 text-sm">Loading cases...</div>
 
             <!-- Table -->
             <div v-else class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -139,11 +144,11 @@ function formatDate(iso: string) {
                         </tr>
                     </thead>
                     <tbody>
-                        <tr v-if="filteredCases.length === 0">
+                        <tr v-if="displayedCases.length === 0">
                             <td colspan="5" class="px-4 py-8 text-center text-slate-400">No cases found.</td>
                         </tr>
                         <tr
-                            v-for="c in filteredCases"
+                            v-for="c in displayedCases"
                             :key="c._id"
                             class="border-b border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer"
                             @click="$router.push(`/cases/${c._id}`)"
@@ -163,6 +168,17 @@ function formatDate(iso: string) {
                         </tr>
                     </tbody>
                 </table>
+
+                <!-- Load more (closed tab only) -->
+                <div v-if="activeTab === 'closed' && casesStore.closedHasMore" class="px-4 py-3 border-t border-slate-100 text-center">
+                    <button
+                        @click="casesStore.loadMoreClosed()"
+                        :disabled="casesStore.closedLoading"
+                        class="text-sm text-blue-600 hover:text-blue-700 font-medium disabled:opacity-50"
+                    >
+                        {{ casesStore.closedLoading ? 'Loading...' : 'Load more' }}
+                    </button>
+                </div>
             </div>
         </div>
     </div>

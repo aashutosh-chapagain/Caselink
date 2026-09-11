@@ -14,6 +14,8 @@ const authStore = useAuthStore();
 
 const caseData = ref<Case | null>(null);
 const activities = ref<Activity[]>([]);
+const activitiesHasMore = ref(false);
+const activitiesLoading = ref(false);
 const users = ref<WorkspaceUser[]>([]);
 const loading = ref(true);
 const error = ref('');
@@ -78,6 +80,19 @@ async function reassignCase(userId: string) {
     }
 }
 
+async function loadMoreActivities() {
+    if (!activitiesHasMore.value || activities.value.length === 0) return;
+    activitiesLoading.value = true;
+    try {
+        const cursor = activities.value[0]._id;
+        const res = await getActivities(id, { limit: 20, before: cursor });
+        activities.value = [...res.data.activities, ...activities.value];
+        activitiesHasMore.value = res.data.hasMore;
+    } finally {
+        activitiesLoading.value = false;
+    }
+}
+
 async function submitNote() {
     if (!noteText.value.trim()) return;
     noteSubmitting.value = true;
@@ -102,7 +117,8 @@ onMounted(async () => {
             getUsers(),
         ]);
         caseData.value = caseRes.data;
-        activities.value = activitiesRes.data;
+        activities.value = activitiesRes.data.activities;
+        activitiesHasMore.value = activitiesRes.data.hasMore;
         users.value = usersRes.data;
     } catch {
         error.value = 'Case not found or you do not have access.';
@@ -209,6 +225,16 @@ onUnmounted(() => {
                 <!-- Activity timeline -->
                 <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
                     <h2 class="text-sm font-semibold text-slate-700 mb-4">Activity</h2>
+
+                    <div v-if="activitiesHasMore" class="mb-4 text-center">
+                        <button
+                            @click="loadMoreActivities"
+                            :disabled="activitiesLoading"
+                            class="text-sm text-blue-600 hover:text-blue-700 font-medium disabled:opacity-50"
+                        >
+                            {{ activitiesLoading ? 'Loading...' : 'Load older activity' }}
+                        </button>
+                    </div>
 
                     <div v-if="activities.length === 0" class="text-sm text-slate-400">No activity yet.</div>
 

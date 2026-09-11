@@ -11,21 +11,40 @@ router.use(requireAuth);
 router.get('/', async (req: AuthedRequest, res) => {
     const filter: Record<string, unknown> = { workspaceId: req.workspaceId };
 
-    // Caseworkers only see cases assigned to them; admins see everything in the workspace
     if (req.role === 'caseworker') {
         filter.assignedTo = req.userId;
     }
 
-    if (req.query.status) {
-        filter.status = req.query.status;
+    const { status, cursor, limit } = req.query as Record<string, string>;
+
+    if (status) {
+        const statuses = status.split(',');
+        filter.status = statuses.length > 1 ? { $in: statuses } : statuses[0];
     }
 
-    const cases = await CaseModel.find(filter)
+    const isClosedPage = status === 'closed';
+    const pageLimit = isClosedPage ? (parseInt(limit) || 20) : 0;
+
+    if (isClosedPage && cursor) {
+        filter._id = { $lt: cursor };
+    }
+
+    const query = CaseModel.find(filter)
         .populate('assignedTo', 'name email')
         .populate('createdBy', 'name email')
         .sort({ createdAt: -1 });
 
-    res.json(cases);
+    if (pageLimit) query.limit(pageLimit + 1);
+
+    const cases = await query;
+
+    let hasMore = false;
+    if (pageLimit && cases.length > pageLimit) {
+        hasMore = true;
+        cases.pop();
+    }
+
+    res.json({ cases, hasMore });
 });
 
 // POST /api/v1/cases - create a case
