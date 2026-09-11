@@ -88,7 +88,7 @@ client/src/
     socket.ts         # Socket.IO factory — derives server URL from VITE_API_URL, passes JWT in handshake
   stores/
     auth.ts           # Pinia auth store — persists token + user to localStorage; exposes isAdmin getter
-    cases.ts          # Pinia cases store — cases[], loading, error; fetchCases / addCase / updateCase actions
+    cases.ts          # activeCases[] (open/in_progress, fully fetched) + closedCases[] (paginated); fetchActiveCases / fetchClosedCases / loadMoreClosed / addCase / updateCase
   router/index.ts     # Route definitions; requiresAuth meta guard redirects to /login
   views/
     LoginView.vue       # Login form — uses publicClient, stores token+user in auth store on success
@@ -113,20 +113,21 @@ Logout is entirely client-side — the auth store is cleared, localStorage is wi
 
 ### CaseDetailView behaviour
 
-- Fetches case + activities in parallel via `Promise.all` on mount — one round trip
+- Fetches case + activities (last 20) + workspace users in parallel via `Promise.all` on mount — one round trip
+- Activities paginated: "Load older activity" button at top prepends earlier entries using `before` cursor (oldest visible `_id`)
 - Status change buttons call `PATCH /cases/:id`; local state updated from server response (source of truth)
-- Socket.IO `case:updated` patches the case header live (status badge, etc.)
-- Socket.IO `activity:added` appends to the timeline — used for both note additions and status changes
-- Both socket listeners filter by `_id === id` / `caseId === id` to avoid cross-case pollution (all workspace events arrive on the same socket)
+- Socket.IO `case:updated` patches the case header live; `activity:added` appends to the bottom of the timeline
+- Both socket listeners filter by `_id === id` / `caseId === id` to avoid cross-case pollution
 - Add note form clears on success; socket handles appending — no manual push to activities array
 - `getActivities` and `addActivity` are in `client/src/api/cases.ts` (case-scoped routes, kept in same file)
 
 ### CaseListView behaviour
 
-- Fetches all cases once on mount (no status param); filters client-side by tab — instant switching, no extra API calls
-- Socket.IO connects on mount with JWT auth; listens for `case:created` (filtered by active tab) and `case:updated` (always patches in-place); disconnects on unmount
-- Create case modal is available to all authenticated users (both admin and caseworker)
-- `case:created` socket event carries fully populated `assignedTo` and `createdBy` (name + email) — same shape as GET response
+- On mount fetches `status=open,in_progress` into `activeCases` — All/Open/In Progress tabs filter this client-side (instant, no extra requests)
+- Closed tab is paginated: triggers `fetchClosedCases()` on first visit, "Load more" button appends next page via `loadMoreClosed()`
+- Socket.IO `case:created` adds to `activeCases`; `case:updated` patches in-place and removes from `activeCases` if status becomes closed
+- Create case modal available to all authenticated users
+- `case:created` socket event carries fully populated `assignedTo` and `createdBy` — same shape as GET response
 
 ### API base URL
 
@@ -146,7 +147,10 @@ The REST API is intentionally structured for reuse by a future React Native clie
 - **`case:created` socket payload is fully populated** — the POST route calls `.populate()` before emitting so `assignedTo.name` is available on the client. If you add new routes that create cases, remember to populate before emitting.
 - **Status change emits two socket events** — `case:updated` (for the status badge) AND `activity:added` (for the timeline entry). Both must be emitted; missing one means either the badge or the timeline goes stale for other connected users.
 - **`activity:added` payload must have `authorId` populated** — both the activities POST route and the cases PATCH route call `.populate('authorId', 'name email')` before emitting. Raw ObjectId will silently show "System" in the timeline instead of the author name.
-- **Tab filtering is client-side** — `fetchCases()` in the cases store always fetches all cases with no status filter. The `?status=` query param on `GET /cases` still works for future use but is not called by the UI during tab switches.
+- **`GET /cases` response shape changed** — now returns `{ cases: Case[], hasMore: boolean }` instead of a plain array. All client code must destructure `res.data.cases`.
+- **Pagination uses the `limit+1` trick** — server fetches `limit+1` records; if count exceeds limit, `hasMore=true` and the extra record is popped. No COUNT query needed.
+- **Activity cursor is the oldest visible `_id`** — `loadMoreActivities` passes `activities[0]._id` as the `before` param. Server sorts DESC, limits, then reverses for chronological display.
+- **`GET /cases?status=` supports comma-separated values** — e.g. `status=open,in_progress` fetches both in one query using Mongoose `$in`. Single value still works as a plain equality filter.
 
 
 ## Seed Credentials
