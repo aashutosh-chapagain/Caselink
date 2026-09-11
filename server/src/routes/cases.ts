@@ -49,16 +49,28 @@ router.get('/', async (req: AuthedRequest, res) => {
 
 // POST /api/v1/cases - create a case
 router.post('/', async (req: AuthedRequest, res) => {
-    const { title, description, region } = req.body;
+    const { title, description, region, priority, type } = req.body;
 
-    if (!title || !description || !region) {
+    if (!title || !description || !region || !type) {
         return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const validTypes = ['fire', 'medical', 'welfare_check', 'missing_person', 'hazmat', 'rescue', 'other'];
+    if (!validTypes.includes(type)) {
+        return res.status(400).json({ error: 'Invalid case type' });
+    }
+
+    const validPriorities = ['critical', 'high', 'medium', 'low'];
+    if (priority !== undefined && !validPriorities.includes(priority)) {
+        return res.status(400).json({ error: 'Invalid priority' });
     }
 
     const newCase = await CaseModel.create({
         title,
         description,
         region,
+        type,
+        priority: priority || 'medium',
         status: 'open',
         createdBy: req.userId,
         assignedTo: req.userId,

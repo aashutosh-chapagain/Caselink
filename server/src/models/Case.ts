@@ -4,6 +4,12 @@ const caseSchema = new Schema({
     title: { type: String, required: true },
     description: { type: String, required: true },
     status: { type: String, enum: ['open', 'in_progress', 'closed'], default: 'open' },
+    priority: { type: String, enum: ['critical', 'high', 'medium', 'low'], default: 'medium' },
+    type: {
+        type: String,
+        enum: ['fire', 'medical', 'welfare_check', 'missing_person', 'hazmat', 'rescue', 'other'],
+        required: true,
+    },
     region: { type: String, required: true },
     assignedTo: { type: Schema.Types.ObjectId, ref: 'User' },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },

@@ -104,6 +104,15 @@ The auth store token is read from `localStorage` on page load. The axios `client
 
 Logout is entirely client-side — the auth store is cleared, localStorage is wiped, and the user is redirected to `/`. The server uses stateless JWTs so there is nothing to invalidate server-side. The token remains cryptographically valid until its 7-day expiry but the client has no way to send it. A server-side token blacklist is not implemented; add one if forcible session revocation (e.g. admin deactivating an account) is required.
 
+### Case fields
+
+Each case carries two classification fields added alongside the core status/region/description:
+
+- **`priority`** — `critical | high | medium | low` (default `medium`). Displayed as a colour-coded badge in both the list and detail views. Red=critical, orange=high, yellow=medium, green=low.
+- **`type`** — `fire | medical | welfare_check | missing_person | hazmat | rescue | other` (required). Displayed as plain text in the list and as a metadata row in the detail view.
+
+Both fields are required in `CreateCasePayload`. The POST route validates both against their enum lists and returns 400 for unknown values. The seed script uses varied types/priorities across its 5 demo cases.
+
 ### Case reassignment
 
 - Admin-only: server returns 403 if `assignedTo` is present in the PATCH body and `req.role !== 'admin'`
@@ -126,7 +135,7 @@ Logout is entirely client-side — the auth store is cleared, localStorage is wi
 - On mount fetches `status=open,in_progress` into `activeCases` — All/Open/In Progress tabs filter this client-side (instant, no extra requests)
 - Closed tab is paginated: triggers `fetchClosedCases()` on first visit, "Load more" button appends next page via `loadMoreClosed()`
 - Socket.IO `case:created` adds to `activeCases`; `case:updated` patches in-place and removes from `activeCases` if status becomes closed
-- Create case modal available to all authenticated users
+- Create case modal available to all authenticated users; includes Type (required, select) and Priority (required, default medium) fields
 - `case:created` socket event carries fully populated `assignedTo` and `createdBy` — same shape as GET response
 
 ### API base URL

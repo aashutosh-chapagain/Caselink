@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { getCase, updateCase, getActivities, addActivity, type Case, type Activity } from '../api/cases';
+import { getCase, updateCase, getActivities, addActivity, type Case, type Activity, type CasePriority } from '../api/cases';
 import { getUsers, type WorkspaceUser } from '../api/users';
 import { useAuthStore } from '../stores/auth';
 import { createSocket } from '../api/socket';
@@ -43,6 +43,30 @@ const activityTypeStyles: Record<string, string> = {
     note: 'bg-slate-100 text-slate-600',
     status_change: 'bg-blue-50 text-blue-600',
     assignment: 'bg-purple-50 text-purple-600',
+};
+
+const priorityStyles: Record<CasePriority, string> = {
+    critical: 'bg-red-100 text-red-700',
+    high: 'bg-orange-100 text-orange-700',
+    medium: 'bg-yellow-100 text-yellow-700',
+    low: 'bg-green-100 text-green-700',
+};
+
+const priorityLabel: Record<CasePriority, string> = {
+    critical: 'Critical',
+    high: 'High',
+    medium: 'Medium',
+    low: 'Low',
+};
+
+const typeLabel: Record<string, string> = {
+    fire: 'Fire',
+    medical: 'Medical',
+    welfare_check: 'Welfare Check',
+    missing_person: 'Missing Person',
+    hazmat: 'Hazmat',
+    rescue: 'Rescue',
+    other: 'Other',
 };
 
 function formatDate(iso: string) {
@@ -162,17 +186,33 @@ onUnmounted(() => {
                 <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
                     <div class="flex items-start justify-between gap-4">
                         <h1 class="text-xl font-bold text-slate-800">{{ caseData.title }}</h1>
-                        <span
-                            class="shrink-0 inline-block px-2 py-0.5 rounded-full text-xs font-medium"
-                            :class="statusStyles[caseData.status]"
-                        >
-                            {{ statusLabel[caseData.status] }}
-                        </span>
+                        <div class="flex items-center gap-2 shrink-0">
+                            <span
+                                class="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
+                                :class="priorityStyles[caseData.priority]"
+                            >
+                                {{ priorityLabel[caseData.priority] }}
+                            </span>
+                            <span
+                                class="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
+                                :class="statusStyles[caseData.status]"
+                            >
+                                {{ statusLabel[caseData.status] }}
+                            </span>
+                        </div>
                     </div>
 
                     <p class="mt-3 text-sm text-slate-600">{{ caseData.description }}</p>
 
                     <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                            <span class="text-slate-400">Type</span>
+                            <p class="text-slate-700 font-medium">{{ typeLabel[caseData.type] ?? caseData.type }}</p>
+                        </div>
+                        <div>
+                            <span class="text-slate-400">Priority</span>
+                            <p class="text-slate-700 font-medium">{{ priorityLabel[caseData.priority] }}</p>
+                        </div>
                         <div>
                             <span class="text-slate-400">Region</span>
                             <p class="text-slate-700 font-medium">{{ caseData.region }}</p>

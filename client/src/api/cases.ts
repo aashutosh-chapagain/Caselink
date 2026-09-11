@@ -6,11 +6,16 @@ export interface CaseUser {
     email: string;
 }
 
+export type CasePriority = 'critical' | 'high' | 'medium' | 'low';
+export type CaseType = 'fire' | 'medical' | 'welfare_check' | 'missing_person' | 'hazmat' | 'rescue' | 'other';
+
 export interface Case {
     _id: string;
     title: string;
     description: string;
     status: 'open' | 'in_progress' | 'closed';
+    priority: CasePriority;
+    type: CaseType;
     region: string;
     assignedTo: CaseUser | null;
     createdBy: CaseUser | null;
@@ -23,6 +28,8 @@ export interface CreateCasePayload {
     title: string;
     description: string;
     region: string;
+    priority: CasePriority;
+    type: CaseType;
 }
 
 export interface CasesResponse {

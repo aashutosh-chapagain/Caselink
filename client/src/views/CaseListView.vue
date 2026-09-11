@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useCasesStore } from '../stores/cases';
-import { createCase, type Case } from '../api/cases';
+import { createCase, type Case, type CasePriority, type CaseType } from '../api/cases';
 import { createSocket } from '../api/socket';
 
 const casesStore = useCasesStore();
@@ -9,19 +9,40 @@ const casesStore = useCasesStore();
 const showModal = ref(false);
 const submitting = ref(false);
 const modalError = ref('');
-const form = ref({ title: '', description: '', region: '' });
+const form = ref({ title: '', description: '', region: '', priority: 'medium' as CasePriority, type: '' as CaseType | '' });
+
+const priorityOptions: { label: string; value: CasePriority }[] = [
+    { label: 'Critical', value: 'critical' },
+    { label: 'High', value: 'high' },
+    { label: 'Medium', value: 'medium' },
+    { label: 'Low', value: 'low' },
+];
+
+const caseTypeOptions: { label: string; value: CaseType }[] = [
+    { label: 'Fire', value: 'fire' },
+    { label: 'Medical', value: 'medical' },
+    { label: 'Welfare Check', value: 'welfare_check' },
+    { label: 'Missing Person', value: 'missing_person' },
+    { label: 'Hazmat', value: 'hazmat' },
+    { label: 'Rescue', value: 'rescue' },
+    { label: 'Other', value: 'other' },
+];
 
 function openModal() {
-    form.value = { title: '', description: '', region: '' };
+    form.value = { title: '', description: '', region: '', priority: 'medium', type: '' };
     modalError.value = '';
     showModal.value = true;
 }
 
 async function submitCase() {
+    if (!form.value.type) {
+        modalError.value = 'Please select a case type';
+        return;
+    }
     submitting.value = true;
     modalError.value = '';
     try {
-        await createCase(form.value);
+        await createCase(form.value as Parameters<typeof createCase>[0]);
         showModal.value = false;
     } catch (err: any) {
         modalError.value = err.response?.data?.error || 'Failed to create case';
@@ -86,6 +107,30 @@ const statusLabel: Record<string, string> = {
     closed: 'Closed',
 };
 
+const priorityStyles: Record<string, string> = {
+    critical: 'bg-red-100 text-red-700',
+    high: 'bg-orange-100 text-orange-700',
+    medium: 'bg-yellow-100 text-yellow-700',
+    low: 'bg-green-100 text-green-700',
+};
+
+const priorityLabel: Record<string, string> = {
+    critical: 'Critical',
+    high: 'High',
+    medium: 'Medium',
+    low: 'Low',
+};
+
+const typeLabel: Record<string, string> = {
+    fire: 'Fire',
+    medical: 'Medical',
+    welfare_check: 'Welfare Check',
+    missing_person: 'Missing Person',
+    hazmat: 'Hazmat',
+    rescue: 'Rescue',
+    other: 'Other',
+};
+
 function formatDate(iso: string) {
     return new Date(iso).toLocaleDateString('en-AU', {
         day: 'numeric',
@@ -137,6 +182,8 @@ function formatDate(iso: string) {
                     <thead class="bg-slate-50 border-b border-slate-200">
                         <tr>
                             <th class="text-left px-4 py-3 font-medium text-slate-600">Title</th>
+                            <th class="text-left px-4 py-3 font-medium text-slate-600">Type</th>
+                            <th class="text-left px-4 py-3 font-medium text-slate-600">Priority</th>
                             <th class="text-left px-4 py-3 font-medium text-slate-600">Status</th>
                             <th class="text-left px-4 py-3 font-medium text-slate-600">Region</th>
                             <th class="text-left px-4 py-3 font-medium text-slate-600">Assigned To</th>
@@ -145,7 +192,7 @@ function formatDate(iso: string) {
                     </thead>
                     <tbody>
                         <tr v-if="displayedCases.length === 0">
-                            <td colspan="5" class="px-4 py-8 text-center text-slate-400">No cases found.</td>
+                            <td colspan="7" class="px-4 py-8 text-center text-slate-400">No cases found.</td>
                         </tr>
                         <tr
                             v-for="c in displayedCases"
@@ -154,6 +201,15 @@ function formatDate(iso: string) {
                             @click="$router.push(`/cases/${c._id}`)"
                         >
                             <td class="px-4 py-3 font-medium text-slate-800">{{ c.title }}</td>
+                            <td class="px-4 py-3 text-slate-600 text-xs">{{ typeLabel[c.type] ?? c.type }}</td>
+                            <td class="px-4 py-3">
+                                <span
+                                    class="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
+                                    :class="priorityStyles[c.priority]"
+                                >
+                                    {{ priorityLabel[c.priority] }}
+                                </span>
+                            </td>
                             <td class="px-4 py-3">
                                 <span
                                     class="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
@@ -208,6 +264,33 @@ function formatDate(iso: string) {
                         class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm resize-none"
                         placeholder="Brief description"
                     />
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-600 mb-1">Case Type</label>
+                        <select
+                            v-model="form.type"
+                            required
+                            class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-700"
+                        >
+                            <option value="" disabled>Select type…</option>
+                            <option v-for="opt in caseTypeOptions" :key="opt.value" :value="opt.value">
+                                {{ opt.label }}
+                            </option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-600 mb-1">Priority</label>
+                        <select
+                            v-model="form.priority"
+                            required
+                            class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-700"
+                        >
+                            <option v-for="opt in priorityOptions" :key="opt.value" :value="opt.value">
+                                {{ opt.label }}
+                            </option>
+                        </select>
+                    </div>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-slate-600 mb-1">Region</label>
