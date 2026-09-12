@@ -173,6 +173,21 @@ Result: Critical cases always appear at the top; within the same priority, most 
 - Create case modal available to all authenticated users; includes Type (required), Priority (default medium), and Address (optional, Nominatim autocomplete) fields
 - `case:created` socket event carries fully populated `assignedTo` and `createdBy` — same shape as GET response
 
+### Dashboard
+
+`GET /api/v1/dashboard/stats` — returns aggregated counts in one round trip using five parallel MongoDB aggregations (`Promise.all`): by status, by priority, by type, per-assignee workload, and closed-this-month count. Caseworkers are scoped to their own cases; admins see the full workspace.
+
+`GET /api/v1/dashboard/activity` — returns the last 10 activities workspace-wide (admin) or scoped to the caseworker's assigned cases. Populates both `authorId` (name) and `caseId` (title) so the feed can link to the case without extra fetches.
+
+Client components:
+- `StatCard.vue` — summary card (label + number + optional sublabel + colour). Used 4 times in the top row.
+- `BreakdownBar.vue` — labelled CSS progress bar (count / total → percentage). Used for priority and type breakdowns. No chart library — pure CSS with a `computed` percentage.
+- `DashboardView.vue` — composes the above plus an inline workload table (admin only) and recent activity feed. Fetches stats and activity in parallel on mount.
+
+`DashboardView` is the post-login landing page. Nav bar links highlight the active route via `$route.path`. Login redirects to `/dashboard`.
+
+**Gotcha:** `/dashboard` must be registered in `router/index.ts` — Vue Router silently renders nothing for unknown paths rather than throwing an error.
+
 ### API base URL
 
 All authenticated API calls go through `client/src/api/client.ts`. The base URL comes from `VITE_API_URL` (set in `client/.env`). Public calls use `publicClient.ts` which shares the same base URL but no auth header.

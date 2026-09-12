@@ -10,6 +10,12 @@ const router = createRouter({
             component: () => import('../views/LoginView.vue'),
         },
         {
+            path: '/dashboard',
+            name: 'dashboard',
+            component: () => import('../views/DashboardView.vue'),
+            meta: { requiresAuth: true },
+        },
+        {
             path: `/cases`,
             name: 'cases',
             component: () => import('../views/CaseListView.vue'),

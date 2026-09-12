@@ -23,7 +23,7 @@ async function handleLogin() {
         });
         console.log('Login successful:', res.data);
         authStore.setAuth(res.data.token, res.data.user);   
-        router.push('/cases');
+        router.push('/dashboard');
 
     } catch (err: any) {
         error.value = err.response?.data?.error || 'Login failed';
