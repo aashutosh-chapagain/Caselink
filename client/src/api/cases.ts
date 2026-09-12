@@ -17,6 +17,9 @@ export interface Case {
     priority: CasePriority;
     type: CaseType;
     region: string;
+    address?: string;
+    lat?: number;
+    lng?: number;
     assignedTo: CaseUser | null;
     createdBy: CaseUser | null;
     workspaceId: string;
@@ -30,6 +33,9 @@ export interface CreateCasePayload {
     region: string;
     priority: CasePriority;
     type: CaseType;
+    address?: string;
+    lat?: number;
+    lng?: number;
 }
 
 export interface CasesResponse {

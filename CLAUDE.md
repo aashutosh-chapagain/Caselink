@@ -106,12 +106,26 @@ Logout is entirely client-side — the auth store is cleared, localStorage is wi
 
 ### Case fields
 
-Each case carries two classification fields added alongside the core status/region/description:
+Each case carries classification and location fields alongside the core status/region/description:
 
 - **`priority`** — `critical | high | medium | low` (default `medium`). Displayed as a colour-coded badge in both the list and detail views. Red=critical, orange=high, yellow=medium, green=low.
 - **`type`** — `fire | medical | welfare_check | missing_person | hazmat | rescue | other` (required). Displayed as plain text in the list and as a metadata row in the detail view.
+- **`address`** — optional free-text address string from Nominatim (e.g. "14 Stirling Street, Perth, Western Australia, 6000, Australia"). Only stored when the user picks from the autocomplete.
+- **`lat` / `lng`** — optional coordinates (Number) stored alongside the address. Always present if `address` is present.
 
-Both fields are required in `CreateCasePayload`. The POST route validates both against their enum lists and returns 400 for unknown values. The seed script uses varied types/priorities across its 5 demo cases.
+`type` is required in `CreateCasePayload`; `priority` defaults to `medium`; `address/lat/lng` are optional. The POST route validates `type` and `priority` against their enum lists and returns 400 for unknown values. The seed script uses varied types/priorities and real Perth coordinates across its 5 demo cases.
+
+### Address autocomplete
+
+`client/src/components/AddressAutocomplete.vue` — self-contained component that:
+- Debounces user input (300ms) before querying Nominatim
+- Fetches from `https://nominatim.openstreetmap.org/search` with `countrycodes=au&limit=5`
+- Shows a dropdown of suggestions; `@mousedown.prevent` on items prevents the input blur from closing the dropdown before selection registers
+- Emits `select: { address, lat, lng }` to the parent on pick; emits empty values on clear
+- Cleans up the debounce timer and click-outside listener in `onUnmounted`
+- Requires `User-Agent: Caselink/1.0` header per Nominatim's terms
+
+The `CaseListView` modal wires it up via `@select="onAddressSelect"` which sets `form.address/lat/lng`. On submit, address fields are only included in the payload if `address` is truthy — cases without an address are submitted cleanly without zero-value lat/lng.
 
 ### Case reassignment
 
@@ -135,7 +149,7 @@ Both fields are required in `CreateCasePayload`. The POST route validates both a
 - On mount fetches `status=open,in_progress` into `activeCases` — All/Open/In Progress tabs filter this client-side (instant, no extra requests)
 - Closed tab is paginated: triggers `fetchClosedCases()` on first visit, "Load more" button appends next page via `loadMoreClosed()`
 - Socket.IO `case:created` adds to `activeCases`; `case:updated` patches in-place and removes from `activeCases` if status becomes closed
-- Create case modal available to all authenticated users; includes Type (required, select) and Priority (required, default medium) fields
+- Create case modal available to all authenticated users; includes Type (required), Priority (default medium), and Address (optional, Nominatim autocomplete) fields
 - `case:created` socket event carries fully populated `assignedTo` and `createdBy` — same shape as GET response
 
 ### API base URL

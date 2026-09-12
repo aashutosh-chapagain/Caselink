@@ -240,6 +240,10 @@ onUnmounted(() => {
                             <span class="text-slate-400">Created</span>
                             <p class="text-slate-700 font-medium">{{ formatDate(caseData.createdAt) }}</p>
                         </div>
+                        <div v-if="caseData.address" class="col-span-2">
+                            <span class="text-slate-400">Address</span>
+                            <p class="text-slate-700 font-medium">{{ caseData.address }}</p>
+                        </div>
                     </div>
 
                     <!-- Status change -->

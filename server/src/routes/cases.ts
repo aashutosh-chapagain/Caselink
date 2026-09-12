@@ -49,7 +49,7 @@ router.get('/', async (req: AuthedRequest, res) => {
 
 // POST /api/v1/cases - create a case
 router.post('/', async (req: AuthedRequest, res) => {
-    const { title, description, region, priority, type } = req.body;
+    const { title, description, region, priority, type, address, lat, lng } = req.body;
 
     if (!title || !description || !region || !type) {
         return res.status(400).json({ error: 'Missing required fields' });
@@ -72,6 +72,9 @@ router.post('/', async (req: AuthedRequest, res) => {
         type,
         priority: priority || 'medium',
         status: 'open',
+        ...(address && { address }),
+        ...(lat !== undefined && { lat }),
+        ...(lng !== undefined && { lng }),
         createdBy: req.userId,
         assignedTo: req.userId,
         workspaceId: req.workspaceId,

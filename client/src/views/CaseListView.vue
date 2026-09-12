@@ -3,13 +3,14 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useCasesStore } from '../stores/cases';
 import { createCase, type Case, type CasePriority, type CaseType } from '../api/cases';
 import { createSocket } from '../api/socket';
+import AddressAutocomplete from '../components/AddressAutocomplete.vue';
 
 const casesStore = useCasesStore();
 
 const showModal = ref(false);
 const submitting = ref(false);
 const modalError = ref('');
-const form = ref({ title: '', description: '', region: '', priority: 'medium' as CasePriority, type: '' as CaseType | '' });
+const form = ref({ title: '', description: '', region: '', priority: 'medium' as CasePriority, type: '' as CaseType | '', address: '', lat: 0, lng: 0 });
 
 const priorityOptions: { label: string; value: CasePriority }[] = [
     { label: 'Critical', value: 'critical' },
@@ -29,9 +30,15 @@ const caseTypeOptions: { label: string; value: CaseType }[] = [
 ];
 
 function openModal() {
-    form.value = { title: '', description: '', region: '', priority: 'medium', type: '' };
+    form.value = { title: '', description: '', region: '', priority: 'medium', type: '', address: '', lat: 0, lng: 0 };
     modalError.value = '';
     showModal.value = true;
+}
+
+function onAddressSelect(selected: { address: string; lat: number; lng: number }) {
+    form.value.address = selected.address;
+    form.value.lat = selected.lat;
+    form.value.lng = selected.lng;
 }
 
 async function submitCase() {
@@ -42,7 +49,12 @@ async function submitCase() {
     submitting.value = true;
     modalError.value = '';
     try {
-        await createCase(form.value as Parameters<typeof createCase>[0]);
+        const { address, lat, lng, ...rest } = form.value;
+        const payload = {
+            ...rest,
+            ...(address && { address, lat, lng }),
+        };
+        await createCase(payload as Parameters<typeof createCase>[0]);
         showModal.value = false;
     } catch (err: any) {
         modalError.value = err.response?.data?.error || 'Failed to create case';
@@ -301,6 +313,12 @@ function formatDate(iso: string) {
                         class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
                         placeholder="e.g. Perth Metro"
                     />
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-600 mb-1">
+                        Address <span class="text-slate-400 font-normal">(optional)</span>
+                    </label>
+                    <AddressAutocomplete @select="onAddressSelect" />
                 </div>
 
                 <p v-if="modalError" class="text-red-600 text-sm">{{ modalError }}</p>
