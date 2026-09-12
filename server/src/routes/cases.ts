@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import mongoose from 'mongoose';
 import CaseModel from '../models/Case';
 import Activity from '../models/Activity';
 import { requireAuth, AuthedRequest } from '../middleware/auth';
@@ -9,13 +10,16 @@ router.use(requireAuth);
 
 // GET /api/v1/cases - list cases (scoped by workspace + role)
 router.get('/', async (req: AuthedRequest, res) => {
-    const filter: Record<string, unknown> = { workspaceId: req.workspaceId };
+    const { status, cursor, limit } = req.query as Record<string, string>;
+
+    // Aggregation requires explicit ObjectId casting — unlike find(), $match does not auto-cast strings.
+    const filter: Record<string, unknown> = {
+        workspaceId: new mongoose.Types.ObjectId(req.workspaceId),
+    };
 
     if (req.role === 'caseworker') {
-        filter.assignedTo = req.userId;
+        filter.assignedTo = new mongoose.Types.ObjectId(req.userId);
     }
-
-    const { status, cursor, limit } = req.query as Record<string, string>;
 
     if (status) {
         const statuses = status.split(',');
@@ -26,23 +30,44 @@ router.get('/', async (req: AuthedRequest, res) => {
     const pageLimit = isClosedPage ? (parseInt(limit) || 20) : 0;
 
     if (isClosedPage && cursor) {
-        filter._id = { $lt: cursor };
+        filter._id = { $lt: new mongoose.Types.ObjectId(cursor) };
     }
 
-    const query = CaseModel.find(filter)
-        .populate('assignedTo', 'name email')
-        .populate('createdBy', 'name email')
-        .sort({ createdAt: -1 });
+    const pipeline: mongoose.PipelineStage[] = [
+        { $match: filter },
+        {
+            $addFields: {
+                priorityOrder: {
+                    $switch: {
+                        branches: [
+                            { case: { $eq: ['$priority', 'critical'] }, then: 0 },
+                            { case: { $eq: ['$priority', 'high'] }, then: 1 },
+                            { case: { $eq: ['$priority', 'medium'] }, then: 2 },
+                            { case: { $eq: ['$priority', 'low'] }, then: 3 },
+                        ],
+                        default: 4,
+                    },
+                },
+            },
+        },
+        { $sort: { priorityOrder: 1, updatedAt: -1 } },
+    ];
 
-    if (pageLimit) query.limit(pageLimit + 1);
+    if (pageLimit) pipeline.push({ $limit: pageLimit + 1 });
 
-    const cases = await query;
+    const cases = await CaseModel.aggregate(pipeline);
 
     let hasMore = false;
     if (pageLimit && cases.length > pageLimit) {
         hasMore = true;
         cases.pop();
     }
+
+    // aggregate() returns plain objects — populate them after
+    await CaseModel.populate(cases, [
+        { path: 'assignedTo', select: 'name email' },
+        { path: 'createdBy', select: 'name email' },
+    ]);
 
     res.json({ cases, hasMore });
 });
@@ -107,7 +132,7 @@ router.get('/:id', async (req: AuthedRequest, res) => {
 
 // PATCH /api/v1/cases/:id - update status, assignee, title, or description
 router.patch('/:id', async (req: AuthedRequest, res) => {
-    const { status, assignedTo, title, description } = req.body;
+    const { status, assignedTo, title, description, address, lat, lng } = req.body;
 
     if (assignedTo !== undefined && req.role !== 'admin') {
         return res.status(403).json({ error: 'Only admins can reassign cases' });
@@ -135,6 +160,12 @@ router.patch('/:id', async (req: AuthedRequest, res) => {
 
     if (description !== undefined && description.trim() !== existing.description) {
         existing.description = description.trim();
+    }
+
+    if (address !== undefined) {
+        existing.address = address || undefined;
+        existing.lat = address ? lat : undefined;
+        existing.lng = address ? lng : undefined;
     }
 
     if (status !== undefined && status !== existing.status) {

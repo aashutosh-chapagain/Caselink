@@ -127,6 +127,27 @@ Each case carries classification and location fields alongside the core status/r
 
 The `CaseListView` modal wires it up via `@select="onAddressSelect"` which sets `form.address/lat/lng`. On submit, address fields are only included in the payload if `address` is truthy — cases without an address are submitted cleanly without zero-value lat/lng.
 
+The `CaseDetailView` edit mode also includes `AddressAutocomplete` — shows the current address as a label above the input. On save, `address` is always sent to the server; an empty string clears the field (server converts `""` to `undefined`).
+
+### Map view
+
+`client/src/components/CaseMap.vue` — Leaflet map component rendered on `CaseDetailView` when a case has `lat`/`lng`. Uses free OpenStreetMap tiles, no API key required.
+- Leaflet marker icon URLs are fixed for Vite via `L.Icon.Default.mergeOptions()` — without this, markers render as broken images
+- Map instance and marker are stored as module-level `let` vars; a `watch` on `lat`/`lng`/`label` props calls `map.setView()` and `marker.setLatLng()` so the map updates when address is edited and saved
+- `map.remove()` called in `onUnmounted` to prevent "map container already initialized" errors on remount
+- `z-0` on the container prevents Leaflet controls bleeding over modals/dropdowns
+
+### Case list ordering
+
+`GET /cases` now uses a MongoDB aggregation pipeline instead of `.find()`:
+1. `$match` — workspace/role/status/cursor filters (ObjectIds must be explicitly cast — aggregation does not auto-cast strings unlike `find()`)
+2. `$addFields` — adds a temporary `priorityOrder` field (critical=0, high=1, medium=2, low=3) via `$switch`
+3. `$sort` — `priorityOrder asc`, then `updatedAt desc`
+4. `$limit` — applied for closed-case pagination
+5. `CaseModel.populate()` — static populate called after aggregation since `aggregate()` returns plain objects, not Mongoose documents
+
+Result: Critical cases always appear at the top; within the same priority, most recently updated cases come first.
+
 ### Case reassignment
 
 - Admin-only: server returns 403 if `assignedTo` is present in the PATCH body and `req.role !== 'admin'`

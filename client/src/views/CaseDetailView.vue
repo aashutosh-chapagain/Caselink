@@ -5,6 +5,8 @@ import { getCase, updateCase, getActivities, addActivity, type Case, type Activi
 import { getUsers, type WorkspaceUser } from '../api/users';
 import { useAuthStore } from '../stores/auth';
 import { createSocket } from '../api/socket';
+import CaseMap from '../components/CaseMap.vue';
+import AddressAutocomplete from '../components/AddressAutocomplete.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -28,6 +30,9 @@ const noteError = ref('');
 const editing = ref(false);
 const editTitle = ref('');
 const editDescription = ref('');
+const editAddress = ref('');
+const editLat = ref(0);
+const editLng = ref(0);
 const editSaving = ref(false);
 const editError = ref('');
 
@@ -35,8 +40,17 @@ function startEdit() {
     if (!caseData.value) return;
     editTitle.value = caseData.value.title;
     editDescription.value = caseData.value.description;
+    editAddress.value = caseData.value.address ?? '';
+    editLat.value = caseData.value.lat ?? 0;
+    editLng.value = caseData.value.lng ?? 0;
     editError.value = '';
     editing.value = true;
+}
+
+function onEditAddressSelect(selected: { address: string; lat: number; lng: number }) {
+    editAddress.value = selected.address;
+    editLat.value = selected.lat;
+    editLng.value = selected.lng;
 }
 
 function cancelEdit() {
@@ -54,6 +68,8 @@ async function saveEdit() {
         const res = await updateCase(id, {
             title: editTitle.value.trim(),
             description: editDescription.value.trim(),
+            address: editAddress.value,
+            ...(editAddress.value && { lat: editLat.value, lng: editLng.value }),
         });
         caseData.value = res.data;
         editing.value = false;
@@ -275,6 +291,13 @@ onUnmounted(() => {
                                     placeholder="Description"
                                 />
                             </div>
+                            <div>
+                                <label class="block text-xs font-medium text-slate-500 mb-1">
+                                    Address <span class="text-slate-400 font-normal">(optional — type to search)</span>
+                                </label>
+                                <p v-if="editAddress" class="text-xs text-slate-500 mb-1 truncate">Current: {{ editAddress }}</p>
+                                <AddressAutocomplete @select="onEditAddressSelect" />
+                            </div>
                             <p v-if="editError" class="text-red-600 text-xs">{{ editError }}</p>
                             <div class="flex gap-2">
                                 <button
@@ -333,7 +356,13 @@ onUnmounted(() => {
                         </div>
                         <div v-if="caseData.address" class="col-span-2">
                             <span class="text-slate-400">Address</span>
-                            <p class="text-slate-700 font-medium">{{ caseData.address }}</p>
+                            <p class="text-slate-700 font-medium mb-3">{{ caseData.address }}</p>
+                            <CaseMap
+                                v-if="caseData.lat && caseData.lng"
+                                :lat="caseData.lat"
+                                :lng="caseData.lng"
+                                :label="caseData.address"
+                            />
                         </div>
                     </div>
 
