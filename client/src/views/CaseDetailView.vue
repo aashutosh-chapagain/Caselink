@@ -25,6 +25,45 @@ const noteText = ref('');
 const noteSubmitting = ref(false);
 const noteError = ref('');
 
+const editing = ref(false);
+const editTitle = ref('');
+const editDescription = ref('');
+const editSaving = ref(false);
+const editError = ref('');
+
+function startEdit() {
+    if (!caseData.value) return;
+    editTitle.value = caseData.value.title;
+    editDescription.value = caseData.value.description;
+    editError.value = '';
+    editing.value = true;
+}
+
+function cancelEdit() {
+    editing.value = false;
+}
+
+async function saveEdit() {
+    if (!editTitle.value.trim()) {
+        editError.value = 'Title cannot be empty';
+        return;
+    }
+    editSaving.value = true;
+    editError.value = '';
+    try {
+        const res = await updateCase(id, {
+            title: editTitle.value.trim(),
+            description: editDescription.value.trim(),
+        });
+        caseData.value = res.data;
+        editing.value = false;
+    } catch (err: any) {
+        editError.value = err.response?.data?.error || 'Failed to save changes';
+    } finally {
+        editSaving.value = false;
+    }
+}
+
 const statusOptions: Case['status'][] = ['open', 'in_progress', 'closed'];
 
 const statusStyles: Record<string, string> = {
@@ -184,25 +223,77 @@ onUnmounted(() => {
             <template v-else-if="caseData">
                 <!-- Case header -->
                 <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
-                    <div class="flex items-start justify-between gap-4">
-                        <h1 class="text-xl font-bold text-slate-800">{{ caseData.title }}</h1>
-                        <div class="flex items-center gap-2 shrink-0">
-                            <span
-                                class="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
-                                :class="priorityStyles[caseData.priority]"
-                            >
-                                {{ priorityLabel[caseData.priority] }}
-                            </span>
-                            <span
-                                class="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
-                                :class="statusStyles[caseData.status]"
-                            >
-                                {{ statusLabel[caseData.status] }}
-                            </span>
+                    <!-- View mode -->
+                    <template v-if="!editing">
+                        <div class="flex items-start justify-between gap-4">
+                            <div class="flex items-start gap-2 min-w-0">
+                                <h1 class="text-xl font-bold text-slate-800">{{ caseData.title }}</h1>
+                                <button
+                                    @click="startEdit"
+                                    title="Edit title and description"
+                                    class="mt-1 shrink-0 p-1 rounded text-slate-300 hover:text-slate-500 hover:bg-slate-100 transition-colors"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                                    </svg>
+                                </button>
+                            </div>
+                            <div class="flex items-center gap-2 shrink-0">
+                                <span
+                                    class="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
+                                    :class="priorityStyles[caseData.priority]"
+                                >
+                                    {{ priorityLabel[caseData.priority] }}
+                                </span>
+                                <span
+                                    class="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
+                                    :class="statusStyles[caseData.status]"
+                                >
+                                    {{ statusLabel[caseData.status] }}
+                                </span>
+                            </div>
                         </div>
-                    </div>
+                        <p class="mt-3 text-sm text-slate-600">{{ caseData.description }}</p>
+                    </template>
 
-                    <p class="mt-3 text-sm text-slate-600">{{ caseData.description }}</p>
+                    <!-- Edit mode -->
+                    <template v-else>
+                        <div class="space-y-3">
+                            <div>
+                                <input
+                                    v-model="editTitle"
+                                    type="text"
+                                    class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                    placeholder="Case title"
+                                />
+                            </div>
+                            <div>
+                                <textarea
+                                    v-model="editDescription"
+                                    rows="3"
+                                    class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm resize-none text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                    placeholder="Description"
+                                />
+                            </div>
+                            <p v-if="editError" class="text-red-600 text-xs">{{ editError }}</p>
+                            <div class="flex gap-2">
+                                <button
+                                    @click="saveEdit"
+                                    :disabled="editSaving"
+                                    class="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                                >
+                                    {{ editSaving ? 'Saving…' : 'Save' }}
+                                </button>
+                                <button
+                                    @click="cancelEdit"
+                                    :disabled="editSaving"
+                                    class="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-800 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    </template>
 
                     <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
                         <div>

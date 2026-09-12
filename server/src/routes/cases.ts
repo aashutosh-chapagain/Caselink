@@ -105,9 +105,9 @@ router.get('/:id', async (req: AuthedRequest, res) => {
     res.json(found);
 });
 
-// PATCH /api/v1/cases/:id - update status and/or assignee
+// PATCH /api/v1/cases/:id - update status, assignee, title, or description
 router.patch('/:id', async (req: AuthedRequest, res) => {
-    const { status, assignedTo } = req.body;
+    const { status, assignedTo, title, description } = req.body;
 
     if (assignedTo !== undefined && req.role !== 'admin') {
         return res.status(403).json({ error: 'Only admins can reassign cases' });
@@ -118,12 +118,24 @@ router.patch('/:id', async (req: AuthedRequest, res) => {
         return res.status(400).json({ error: 'Invalid status' });
     }
 
+    if (title !== undefined && !title.trim()) {
+        return res.status(400).json({ error: 'Title cannot be empty' });
+    }
+
     const existing = await CaseModel.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
     if (!existing) {
         return res.status(404).json({ error: 'Case not found' });
     }
 
     const activityLogs: Promise<any>[] = [];
+
+    if (title !== undefined && title.trim() !== existing.title) {
+        existing.title = title.trim();
+    }
+
+    if (description !== undefined && description.trim() !== existing.description) {
+        existing.description = description.trim();
+    }
 
     if (status !== undefined && status !== existing.status) {
         const oldStatus = existing.status;
@@ -154,7 +166,9 @@ router.patch('/:id', async (req: AuthedRequest, res) => {
         );
     }
 
-    if (activityLogs.length === 0) {
+    const hasChanges = existing.isModified();
+
+    if (!hasChanges && activityLogs.length === 0) {
         return res.json(existing);
     }
 
