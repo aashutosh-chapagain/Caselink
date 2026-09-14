@@ -1,10 +1,25 @@
 import client from './client';
 
+export interface StaleCase {
+    _id: string;
+    title: string;
+    priority: string;
+    status: string;
+    assignedTo: { _id: string; name: string } | null;
+    createdAt: string;
+}
+
+export interface TrendDay {
+    date: string;
+    count: number;
+}
+
 export interface DashboardStats {
     open: number;
     inProgress: number;
     criticalOpen: number;
     closedThisMonth: number;
+    unassigned: number;
     byPriority: {
         critical: number;
         high: number;
@@ -13,6 +28,8 @@ export interface DashboardStats {
     };
     byType: Record<string, number>;
     workload: WorkloadRow[];
+    staleCases: StaleCase[];
+    trend: TrendDay[];
 }
 
 export interface WorkloadRow {

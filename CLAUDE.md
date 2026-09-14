@@ -175,14 +175,24 @@ Result: Critical cases always appear at the top; within the same priority, most 
 
 ### Dashboard
 
-`GET /api/v1/dashboard/stats` — returns aggregated counts in one round trip using five parallel MongoDB aggregations (`Promise.all`): by status, by priority, by type, per-assignee workload, and closed-this-month count. Caseworkers are scoped to their own cases; admins see the full workspace.
+`GET /api/v1/dashboard/stats` — returns all aggregated data in one round trip using parallel MongoDB queries (`Promise.all`):
+- Counts by status, priority, type (aggregation `$group`)
+- Per-assignee workload with open/inProgress split (`$cond` in `$group`, then `$lookup` for user name)
+- Closed-this-month count
+- Unassigned active cases count (admin only)
+- Stale cases: active cases with no activity in 7+ days — two-step query: `Activity.distinct('caseId')` for recently active cases, then `CaseModel.find({ _id: { $nin: ... } })` for the remainder. Returns up to 5, oldest first.
+- 7-day trend: cases created per day via `$dateToString` group, then server-fills missing days with 0 using `Array.from({ length: 7 })`.
 
-`GET /api/v1/dashboard/activity` — returns the last 10 activities workspace-wide (admin) or scoped to the caseworker's assigned cases. Populates both `authorId` (name) and `caseId` (title) so the feed can link to the case without extra fetches.
+Caseworkers are scoped to their own cases throughout; admins see the full workspace.
+
+`GET /api/v1/dashboard/activity` — last 10 activities workspace-wide (admin) or scoped to caseworker's assigned cases. Populates both `authorId` (name) and `caseId` (title).
 
 Client components:
-- `StatCard.vue` — summary card (label + number + optional sublabel + colour). Used 4 times in the top row.
-- `BreakdownBar.vue` — labelled CSS progress bar (count / total → percentage). Used for priority and type breakdowns. No chart library — pure CSS with a `computed` percentage.
-- `DashboardView.vue` — composes the above plus an inline workload table (admin only) and recent activity feed. Fetches stats and activity in parallel on mount.
+- `StatCard.vue` — summary card (label + number + optional sublabel + colour).
+- `BreakdownBar.vue` — labelled CSS progress bar (kept, not currently used in dashboard).
+- `DashboardView.vue` — composes StatCard, VueApexCharts (donut + horizontal bar + area sparkline), stale cases table, workload table (admin only), and activity feed. All chart options typed as `ApexOptions` to satisfy vue3-apexcharts prop types — `chart.type` requires `as const` or explicit `ApexOptions` return type annotation.
+
+Charts use `computed(): ApexOptions` — without the explicit return type, TypeScript widens `'donut'` to `string`, which fails ApexCharts' union type check.
 
 `DashboardView` is the post-login landing page. Nav bar links highlight the active route via `$route.path`. Login redirects to `/dashboard`.
 
