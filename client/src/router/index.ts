@@ -32,6 +32,12 @@ const router = createRouter({
             name: 'public-alerts',
             component: () => import('../views/PublicAlertsView.vue'),
         },
+        {
+            path: '/alerts/manage',
+            name: 'alerts-manage',
+            component: () => import('../views/AlertsManageView.vue'),
+            meta: { requiresAuth: true, requiresAdmin: true },
+        },
     ]
 })
 
@@ -39,6 +45,9 @@ router.beforeEach((to) => {
     const authStore = useAuthStore()
     if (to.meta.requiresAuth && !authStore.isAuthenticated) {
         return { name: 'login' }
+    }
+    if (to.meta.requiresAdmin && !authStore.isAdmin) {
+        return { name: 'dashboard' }
     }
 })
 

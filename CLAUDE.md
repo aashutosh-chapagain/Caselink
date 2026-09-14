@@ -79,23 +79,26 @@ Socket.IO rooms: each connected socket joins `workspace:<workspaceId>` and `user
 ```
 client/src/
   main.ts             # App bootstrap: Pinia, Vue Router, mount
-  App.vue             # Root component — nav bar (name, role badge, logout) shown when authenticated
+  App.vue             # Root component — nav bar + urgent alert banners (critical/high) shown to all authenticated users; mounts alerts store and socket
   api/
     client.ts         # Axios instance with auth interceptor (auto-attaches Bearer token, redirects to / on 401)
     publicClient.ts   # Axios instance without auth (for unauthenticated routes)
     cases.ts          # getCases, createCase, getCase, updateCase, getActivities, addActivity
+    alerts.ts         # getAlerts, getPublicAlerts, createAlert, toggleAlert; Alert / CreateAlertPayload types
     users.ts          # getUsers() — returns WorkspaceUser[] for the reassign dropdown
     socket.ts         # Socket.IO factory — derives server URL from VITE_API_URL, passes JWT in handshake
   stores/
     auth.ts           # Pinia auth store — persists token + user to localStorage; exposes isAdmin getter
     cases.ts          # activeCases[] (open/in_progress, fully fetched) + closedCases[] (paginated); fetchActiveCases / fetchClosedCases / loadMoreClosed / addCase / updateCase
+    alerts.ts         # Pinia alerts store — fetches once (loaded flag); activeAlerts / urgentAlerts getters; connectSocket() returns socket for caller cleanup
   router/index.ts     # Route definitions; requiresAuth meta guard redirects to /login
   views/
-    LoginView.vue       # Login form — uses publicClient, stores token+user in auth store on success
-    CaseListView.vue    # Case list with status filter tabs, create modal, Socket.IO live updates
-    CaseDetailView.vue  # Case header, status buttons, activity timeline, add note form
-    DashboardView.vue   # (stub/WIP — placeholder div)
-    PublicAlertsView.vue # (stub/WIP — placeholder div; no auth guard)
+    LoginView.vue         # Login form — uses publicClient, stores token+user in auth store on success
+    CaseListView.vue      # Case list with status filter tabs, create modal, Socket.IO live updates
+    CaseDetailView.vue    # Case header, status buttons, activity timeline, add note form
+    DashboardView.vue     # Dashboard: stat cards, charts, stale cases, workload, activity feed, active alerts + map
+    AlertsManageView.vue  # Admin-only alert management: create/toggle alerts, Socket.IO live updates
+    PublicAlertsView.vue  # Public page (no auth) — polls every 30s; reads workspaceId from ?workspace= query param
 ```
 
 The auth store token is read from `localStorage` on page load. The axios `client.ts` interceptor always reads the latest token from the store, so no manual header management is needed in views.
@@ -190,13 +193,39 @@ Caseworkers are scoped to their own cases throughout; admins see the full worksp
 Client components:
 - `StatCard.vue` — summary card (label + number + optional sublabel + colour).
 - `BreakdownBar.vue` — labelled CSS progress bar (kept, not currently used in dashboard).
-- `DashboardView.vue` — composes StatCard, VueApexCharts (donut + horizontal bar + area sparkline), stale cases table, workload table (admin only), and activity feed. All chart options typed as `ApexOptions` to satisfy vue3-apexcharts prop types — `chart.type` requires `as const` or explicit `ApexOptions` return type annotation.
+- `AlertsMap.vue` — multi-pin Leaflet map; accepts `alerts: Alert[]` prop; renders active alerts that have lat/lng as `L.circleMarker` coloured by severity (red/orange/yellow/blue); popups show message + region; `watch` on prop syncs markers reactively; `fitBounds` auto-zooms to show all pins; defaults to Perth if no coords.
+- `DashboardView.vue` — composes StatCard, VueApexCharts (donut + horizontal bar + area sparkline), active alerts section (list + AlertsMap), stale cases table, workload table (admin only), and activity feed. All chart options typed as `ApexOptions` to satisfy vue3-apexcharts prop types — `chart.type` requires `as const` or explicit `ApexOptions` return type annotation.
 
 Charts use `computed(): ApexOptions` — without the explicit return type, TypeScript widens `'donut'` to `string`, which fails ApexCharts' union type check.
 
 `DashboardView` is the post-login landing page. Nav bar links highlight the active route via `$route.path`. Login redirects to `/dashboard`.
 
 **Gotcha:** `/dashboard` must be registered in `router/index.ts` — Vue Router silently renders nothing for unknown paths rather than throwing an error.
+
+### Alerts
+
+**Model** (`server/src/models/Alert.ts`): `message`, `severity` (critical/high/medium/info), `region` (optional free text), `lat`/`lng` (optional coordinates), `isActive` (boolean, default true), `createdBy`, `workspaceId`. Compound index on `{ workspaceId, isActive }`.
+
+**Routes** (`server/src/routes/alerts.ts`):
+- `GET /alerts/public?workspaceId=<id>` — no auth; returns active alerts for a workspace. Public route must be registered **before** `router.use(requireAuth)`.
+- `GET /alerts` — authenticated; returns all alerts (active + inactive), sorted active-first.
+- `POST /alerts` — admin only; accepts `{ message, severity, region?, lat?, lng? }`. Uses `...(lat !== undefined && lng !== undefined && { lat, lng })` spread pattern. Emits `alert:created` via Socket.IO.
+- `PATCH /alerts/:id` — admin only; toggles `isActive` server-side (`!alert.isActive`) — does not accept a value from the client. Emits `alert:updated`.
+
+**Pinia store** (`client/src/stores/alerts.ts`):
+- `loaded` flag prevents double-fetch when both the banner and dashboard use the store
+- `activeAlerts` getter: `isActive === true`
+- `urgentAlerts` getter: active + severity is critical or high
+- `fetchAlerts()` — idempotent; skips if already loaded
+- `connectSocket()` — subscribes to `alert:created` / `alert:updated`; returns the socket so the caller can disconnect it in `onUnmounted`
+
+**In-app banner** (`App.vue`): watches `authStore.isAuthenticated`; on login calls `fetchAlerts()` + `connectSocket()`. Critical and High active alerts render as colored banners below the nav bar. Each banner is individually dismissable (dismissed set is session-local, not persisted). Socket disconnects on logout/unmount.
+
+**Admin view** (`AlertsManageView.vue`): table of all alerts with toggle buttons. Create modal includes `AddressAutocomplete` for optional lat/lng — on selection, `form.region` is set to the address string and `form.lat`/`form.lng` are stored. Per-row toggle state uses `Set<string>` to avoid a single boolean blocking multiple rows. Socket is the source of truth — no manual array push after create.
+
+**Public view** (`PublicAlertsView.vue`): no JWT available so Socket.IO auth is not possible; polls `getPublicAlerts()` every 30 seconds instead. Reads `workspaceId` from `route.query.workspace`. `clearInterval` in `onUnmounted`.
+
+**Dashboard alerts section**: shown at the top of `DashboardView` when `alertsStore.activeAlerts.length > 0`. Lists up to 5 active alerts with severity dot + badge; shows `AlertsMap` alongside if any alert has coordinates.
 
 ### API base URL
 

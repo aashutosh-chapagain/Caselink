@@ -1,14 +1,54 @@
 <script setup lang="ts">
+import { ref, watch, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from './stores/auth';
+import { useAlertsStore } from './stores/alerts';
 
 const router = useRouter();
 const authStore = useAuthStore();
+const alertsStore = useAlertsStore();
+
+// track which urgent alert IDs have been dismissed this session
+const dismissed = ref<Set<string>>(new Set());
+
+let alertSocket: ReturnType<typeof import('./api/socket').createSocket> | null = null;
+
+function visibleUrgent() {
+    return alertsStore.urgentAlerts.filter(a => !dismissed.value.has(a._id));
+}
+
+function dismiss(id: string) {
+    dismissed.value = new Set([...dismissed.value, id]);
+}
+
+// start/stop alerts subscription when auth state changes
+watch(
+    () => authStore.isAuthenticated,
+    (authed) => {
+        if (authed) {
+            alertsStore.fetchAlerts();
+            alertSocket = alertsStore.connectSocket();
+        } else {
+            alertSocket?.disconnect();
+            alertSocket = null;
+        }
+    },
+    { immediate: true },
+);
+
+onUnmounted(() => {
+    alertSocket?.disconnect();
+});
 
 function logout() {
     authStore.logout();
     router.push('/');
 }
+
+const severityBannerStyles: Record<string, string> = {
+    critical: 'bg-red-600 text-white',
+    high:     'bg-orange-500 text-white',
+};
 </script>
 
 <template>
@@ -31,6 +71,14 @@ function logout() {
                     >
                         Cases
                     </button>
+                    <button
+                        v-if="authStore.isAdmin"
+                        @click="router.push('/alerts/manage')"
+                        class="text-slate-500 hover:text-slate-800 transition-colors"
+                        :class="$route.path.startsWith('/alerts') ? 'text-blue-600 font-medium' : ''"
+                    >
+                        Alerts
+                    </button>
                 </div>
             </div>
             <div class="flex items-center gap-4">
@@ -46,6 +94,26 @@ function logout() {
                 </button>
             </div>
         </nav>
+
+        <!-- Urgent alert banners -->
+        <template v-if="authStore.isAuthenticated">
+            <div
+                v-for="alert in visibleUrgent()"
+                :key="alert._id"
+                class="flex items-start gap-3 px-6 py-2.5 text-sm"
+                :class="severityBannerStyles[alert.severity]"
+            >
+                <span class="font-semibold uppercase shrink-0 mt-px">{{ alert.severity }}</span>
+                <span class="flex-1">{{ alert.message }}</span>
+                <span v-if="alert.region" class="opacity-80 shrink-0">{{ alert.region }}</span>
+                <button
+                    @click="dismiss(alert._id)"
+                    class="ml-2 shrink-0 opacity-70 hover:opacity-100 font-bold leading-none"
+                    aria-label="Dismiss"
+                >✕</button>
+            </div>
+        </template>
+
         <router-view />
     </div>
 </template>
