@@ -3,15 +3,13 @@ import { ref, watch, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from './stores/auth';
 import { useAlertsStore } from './stores/alerts';
+import { destroySocket } from './api/socket';
 
 const router = useRouter();
 const authStore = useAuthStore();
 const alertsStore = useAlertsStore();
 
-// track which urgent alert IDs have been dismissed this session
 const dismissed = ref<Set<string>>(new Set());
-
-let alertSocket: ReturnType<typeof import('./api/socket').createSocket> | null = null;
 
 function visibleUrgent() {
     return alertsStore.urgentAlerts.filter(a => !dismissed.value.has(a._id));
@@ -21,23 +19,24 @@ function dismiss(id: string) {
     dismissed.value = new Set([...dismissed.value, id]);
 }
 
-// start/stop alerts subscription when auth state changes
 watch(
-    () => authStore.isAuthenticated,
-    (authed) => {
-        if (authed) {
+    () => authStore.token,
+    (newToken, oldToken) => {
+        if (oldToken) {
+            // previous session cleanup — covers logout AND account switch without logout
+            alertsStore.reset();
+            destroySocket();
+        }
+        if (newToken) {
             alertsStore.fetchAlerts();
-            alertSocket = alertsStore.connectSocket();
-        } else {
-            alertSocket?.disconnect();
-            alertSocket = null;
+            alertsStore.connectSocket();
         }
     },
-    { immediate: true },
+    { immediate: true, flush: 'sync' },
 );
 
 onUnmounted(() => {
-    alertSocket?.disconnect();
+    destroySocket();
 });
 
 function logout() {

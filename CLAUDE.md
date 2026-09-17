@@ -79,19 +79,19 @@ Socket.IO rooms: each connected socket joins `workspace:<workspaceId>` and `user
 ```
 client/src/
   main.ts             # App bootstrap: Pinia, Vue Router, mount
-  App.vue             # Root component — nav bar + urgent alert banners (critical/high) shown to all authenticated users; mounts alerts store and socket
+  App.vue             # Root component — nav bar + urgent alert banners; watches authStore.token (not isAuthenticated) to handle account switches; calls destroySocket + alertsStore.reset on token removal
   api/
     client.ts         # Axios instance with auth interceptor (auto-attaches Bearer token, redirects to / on 401)
     publicClient.ts   # Axios instance without auth (for unauthenticated routes)
     cases.ts          # getCases, createCase, getCase, updateCase, getActivities, addActivity
     alerts.ts         # getAlerts, getPublicAlerts, createAlert, toggleAlert; Alert / CreateAlertPayload types
     users.ts          # getUsers() — returns WorkspaceUser[] for the reassign dropdown
-    socket.ts         # Socket.IO factory — derives server URL from VITE_API_URL, passes JWT in handshake
+    socket.ts         # Socket.IO singleton — getSocket() creates one connection per session; destroySocket() tears it down on logout
   stores/
     auth.ts           # Pinia auth store — persists token + user to localStorage; exposes isAdmin getter
     cases.ts          # activeCases[] (open/in_progress, fully fetched) + closedCases[] (paginated); fetchActiveCases / fetchClosedCases / loadMoreClosed / addCase / updateCase
-    alerts.ts         # Pinia alerts store — fetches once (loaded flag); activeAlerts / urgentAlerts getters; connectSocket() returns socket for caller cleanup
-  router/index.ts     # Route definitions; requiresAuth meta guard redirects to /login
+    alerts.ts         # Pinia alerts store — fetches once (loaded flag); activeAlerts / urgentAlerts getters; connectSocket() is idempotent (guards against duplicate listeners); reset() clears state on logout
+  router/index.ts     # Route definitions; guards redirect unauthenticated users to /login and authenticated users away from /login to /dashboard
   views/
     LoginView.vue         # Login form — uses publicClient, stores token+user in auth store on success
     CaseListView.vue      # Case list with status filter tabs, create modal, Socket.IO live updates
@@ -249,6 +249,10 @@ The REST API is intentionally structured for reuse by a future React Native clie
 - **Pagination uses the `limit+1` trick** — server fetches `limit+1` records; if count exceeds limit, `hasMore=true` and the extra record is popped. No COUNT query needed.
 - **Activity cursor is the oldest visible `_id`** — `loadMoreActivities` passes `activities[0]._id` as the `before` param. Server sorts DESC, limits, then reverses for chronological display.
 - **`GET /cases?status=` supports comma-separated values** — e.g. `status=open,in_progress` fetches both in one query using Mongoose `$in`. Single value still works as a plain equality filter.
+- **Socket.IO is a singleton** — `getSocket()` in `api/socket.ts` creates one connection for the entire authenticated session and returns the same instance on every subsequent call. Views call `socket.on(event, namedHandler)` in `onMounted` and `socket.off(event, namedHandler)` in `onUnmounted` — they never call `socket.disconnect()`. Only `destroySocket()` (called from App.vue on logout) tears down the connection.
+- **`alertsStore.connectSocket()` is idempotent** — it tracks the socket instance it last registered listeners on (`_registeredSocket` module var). Calling it again for the same socket is a no-op. This prevents duplicate listeners if the watch in App.vue ever fires multiple times (e.g., Vite HMR re-running setup).
+- **Watch `authStore.token`, not `authStore.isAuthenticated`** — `isAuthenticated` is `!!token`, so it stays `true` when a user switches accounts without logging out. Watching the token directly ensures the socket is destroyed and recreated with the new token on account switch.
+- **Router redirects authenticated users away from `/`** — `beforeEach` checks `to.name === 'login' && isAuthenticated` first and redirects to `/dashboard`. Without this, a user with a saved token who reopens the app sees the login form with the nav bar already showing.
 
 
 ## Seed Credentials

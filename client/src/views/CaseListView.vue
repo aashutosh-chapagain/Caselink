@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useCasesStore } from '../stores/cases';
 import { createCase, type Case, type CasePriority, type CaseType } from '../api/cases';
-import { createSocket } from '../api/socket';
+import { getSocket } from '../api/socket';
 import AddressAutocomplete from '../components/AddressAutocomplete.vue';
 
 const casesStore = useCasesStore();
@@ -89,22 +89,20 @@ function selectTab(value: string | undefined) {
     }
 }
 
-const socket = createSocket();
+const socket = getSocket();
+
+function onCaseCreated(newCase: Case) { casesStore.addCase(newCase); }
+function onCaseUpdated(updated: Case) { casesStore.updateCase(updated); }
 
 onMounted(() => {
     casesStore.fetchActiveCases();
-
-    socket.on('case:created', (newCase: Case) => {
-        casesStore.addCase(newCase);
-    });
-
-    socket.on('case:updated', (updated: Case) => {
-        casesStore.updateCase(updated);
-    });
+    socket.on('case:created', onCaseCreated);
+    socket.on('case:updated', onCaseUpdated);
 });
 
 onUnmounted(() => {
-    socket.disconnect();
+    socket.off('case:created', onCaseCreated);
+    socket.off('case:updated', onCaseUpdated);
 });
 
 const statusStyles: Record<string, string> = {

@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import { getAlerts, createAlert, toggleAlert, type Alert, type AlertSeverity } from '../api/alerts';
 import { useAuthStore } from '../stores/auth';
-import { createSocket } from '../api/socket';
+import { getSocket } from '../api/socket';
 import AddressAutocomplete from '../components/AddressAutocomplete.vue';
 
 const authStore = useAuthStore();
@@ -91,7 +91,13 @@ function formatDateTime(iso: string) {
     });
 }
 
-const socket = createSocket();
+const socket = getSocket();
+
+function onAlertCreated(alert: Alert) { alerts.value.unshift(alert); }
+function onAlertUpdated(updated: Alert) {
+    const idx = alerts.value.findIndex(a => a._id === updated._id);
+    if (idx !== -1) alerts.value[idx] = updated;
+}
 
 onMounted(async () => {
     try {
@@ -103,18 +109,13 @@ onMounted(async () => {
         loading.value = false;
     }
 
-    socket.on('alert:created', (alert: Alert) => {
-        alerts.value.unshift(alert);
-    });
-
-    socket.on('alert:updated', (updated: Alert) => {
-        const idx = alerts.value.findIndex(a => a._id === updated._id);
-        if (idx !== -1) alerts.value[idx] = updated;
-    });
+    socket.on('alert:created', onAlertCreated);
+    socket.on('alert:updated', onAlertUpdated);
 });
 
 onUnmounted(() => {
-    socket.disconnect();
+    socket.off('alert:created', onAlertCreated);
+    socket.off('alert:updated', onAlertUpdated);
 });
 </script>
 

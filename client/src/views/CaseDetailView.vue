@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { getCase, updateCase, getActivities, addActivity, type Case, type Activity, type CasePriority } from '../api/cases';
 import { getUsers, type WorkspaceUser } from '../api/users';
 import { useAuthStore } from '../stores/auth';
-import { createSocket } from '../api/socket';
+import { getSocket } from '../api/socket';
 import CaseMap from '../components/CaseMap.vue';
 import AddressAutocomplete from '../components/AddressAutocomplete.vue';
 
@@ -186,7 +186,14 @@ async function submitNote() {
     }
 }
 
-const socket = createSocket();
+const socket = getSocket();
+
+function onCaseUpdated(updated: Case) {
+    if (updated._id === id) caseData.value = updated;
+}
+function onActivityAdded(activity: Activity) {
+    if (activity.caseId === id) activities.value.push(activity);
+}
 
 onMounted(async () => {
     try {
@@ -205,17 +212,13 @@ onMounted(async () => {
         loading.value = false;
     }
 
-    socket.on('case:updated', (updated: Case) => {
-        if (updated._id === id) caseData.value = updated;
-    });
-
-    socket.on('activity:added', (activity: Activity) => {
-        if (activity.caseId === id) activities.value.push(activity);
-    });
+    socket.on('case:updated', onCaseUpdated);
+    socket.on('activity:added', onActivityAdded);
 });
 
 onUnmounted(() => {
-    socket.disconnect();
+    socket.off('case:updated', onCaseUpdated);
+    socket.off('activity:added', onActivityAdded);
 });
 </script>
 
