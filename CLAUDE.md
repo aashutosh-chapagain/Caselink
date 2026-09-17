@@ -118,19 +118,22 @@ Each case carries classification and location fields alongside the core status/r
 
 `type` is required in `CreateCasePayload`; `priority` defaults to `medium`; `address/lat/lng` are optional. The POST route validates `type` and `priority` against their enum lists and returns 400 for unknown values. The seed script uses varied types/priorities and real Perth coordinates across its 5 demo cases.
 
-### Address autocomplete
+### Address autocomplete / LocationPicker
 
-`client/src/components/AddressAutocomplete.vue` — self-contained component that:
-- Debounces user input (300ms) before querying Nominatim
-- Fetches from `https://nominatim.openstreetmap.org/search` with `countrycodes=au&limit=5`
-- Shows a dropdown of suggestions; `@mousedown.prevent` on items prevents the input blur from closing the dropdown before selection registers
-- Emits `select: { address, lat, lng }` to the parent on pick; emits empty values on clear
-- Cleans up the debounce timer and click-outside listener in `onUnmounted`
-- Requires `User-Agent: Caselink/1.0` header per Nominatim's terms
+`client/src/components/LocationPicker.vue` — reusable component combining Nominatim address search with an interactive Leaflet map. Replaces the old `AddressAutocomplete.vue`.
+- Debounces user input (300ms) before querying Nominatim with `addressdetails=1&countrycodes=au&limit=5`
+- Dropdown suggestions; `@mousedown.prevent` prevents blur closing dropdown before selection registers
+- Interactive map: click to drop a draggable pin; drag to fine-tune; reverse geocodes on drop/drag end
+- Emits `select: { address, lat, lng, region }` — `region` is the suburb/city/town extracted from Nominatim's structured `address` object (`suburb → city → town → village → county`); falls back to empty string
+- On clear, emits all empty/zero values
+- Accepts `initialAddress / initialLat / initialLng` props to restore an existing pin (edit mode)
+- Requires `User-Agent: Caselink/1.0` header per Nominatim's terms; `addressdetails=1` is also needed on the reverse geocode call to get the structured address
 
-The `CaseListView` modal wires it up via `@select="onAddressSelect"` which sets `form.address/lat/lng`. On submit, address fields are only included in the payload if `address` is truthy — cases without an address are submitted cleanly without zero-value lat/lng.
+The `CaseListView` modal wires it up via `@select="onAddressSelect"` which sets `form.address/lat/lng` and auto-fills `form.region` from `selected.region` (only when non-empty, so a manually typed region is preserved). On submit, address fields are only included in the payload if `address` is truthy.
 
-The `CaseDetailView` edit mode also includes `AddressAutocomplete` — shows the current address as a label above the input. On save, `address` is always sent to the server; an empty string clears the field (server converts `""` to `undefined`).
+The `CaseDetailView` edit mode uses `LocationPicker` with initial props. On save, `address` is always sent to the server; an empty string clears the field (server converts `""` to `undefined`).
+
+The `AlertsManageView` create modal uses `LocationPicker`; on select, `form.region` is set to `region || address` (suburb name preferred, full address as fallback).
 
 ### Map view
 
@@ -221,7 +224,7 @@ Charts use `computed(): ApexOptions` — without the explicit return type, TypeS
 
 **In-app banner** (`App.vue`): watches `authStore.isAuthenticated`; on login calls `fetchAlerts()` + `connectSocket()`. Critical and High active alerts render as colored banners below the nav bar. Each banner is individually dismissable (dismissed set is session-local, not persisted). Socket disconnects on logout/unmount.
 
-**Admin view** (`AlertsManageView.vue`): table of all alerts with toggle buttons. Create modal includes `AddressAutocomplete` for optional lat/lng — on selection, `form.region` is set to the address string and `form.lat`/`form.lng` are stored. Per-row toggle state uses `Set<string>` to avoid a single boolean blocking multiple rows. Socket is the source of truth — no manual array push after create.
+**Admin view** (`AlertsManageView.vue`): table of all alerts with toggle buttons. Create modal includes `LocationPicker` for optional lat/lng — on selection, `form.region` is set to the extracted suburb/city (falling back to full address) and `form.lat`/`form.lng` are stored. Per-row toggle state uses `Set<string>` to avoid a single boolean blocking multiple rows. Socket is the source of truth — no manual array push after create.
 
 **Public view** (`PublicAlertsView.vue`): no JWT available so Socket.IO auth is not possible; polls `getPublicAlerts()` every 30 seconds instead. Reads `workspaceId` from `route.query.workspace`. `clearInterval` in `onUnmounted`.
 

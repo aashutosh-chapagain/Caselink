@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue';
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -27,7 +27,7 @@ const mapEl = ref<HTMLElement | null>(null);
 let map: L.Map | null = null;
 let marker: L.Marker | null = null;
 
-onMounted(() => {
+onMounted(async () => {
     if (!mapEl.value) return;
 
     map = L.map(mapEl.value).setView([props.lat, props.lng], 15);
@@ -42,6 +42,9 @@ onMounted(() => {
     if (props.label) {
         marker.bindPopup(props.label).openPopup();
     }
+
+    await nextTick();
+    map.invalidateSize();
 });
 
 watch(() => [props.lat, props.lng, props.label] as const, ([lat, lng, label]) => {

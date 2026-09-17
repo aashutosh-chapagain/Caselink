@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue';
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { Alert } from '../api/alerts';
@@ -70,7 +70,7 @@ function syncMarkers() {
     }
 }
 
-onMounted(() => {
+onMounted(async () => {
     if (!mapEl.value) return;
 
     // default to Perth, WA if no alerts have coords
@@ -81,6 +81,10 @@ onMounted(() => {
         maxZoom: 19,
     }).addTo(map);
 
+    // Container may not have final dimensions yet when mounted inside a v-if.
+    // invalidateSize() forces Leaflet to recalculate after the layout is settled.
+    await nextTick();
+    map.invalidateSize();
     syncMarkers();
 });
 

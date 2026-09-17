@@ -6,7 +6,7 @@ import { getUsers, type WorkspaceUser } from '../api/users';
 import { useAuthStore } from '../stores/auth';
 import { getSocket } from '../api/socket';
 import CaseMap from '../components/CaseMap.vue';
-import AddressAutocomplete from '../components/AddressAutocomplete.vue';
+import LocationPicker from '../components/LocationPicker.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -296,10 +296,14 @@ onUnmounted(() => {
                             </div>
                             <div>
                                 <label class="block text-xs font-medium text-slate-500 mb-1">
-                                    Address <span class="text-slate-400 font-normal">(optional — type to search)</span>
+                                    Address <span class="text-slate-400 font-normal">(optional)</span>
                                 </label>
-                                <p v-if="editAddress" class="text-xs text-slate-500 mb-1 truncate">Current: {{ editAddress }}</p>
-                                <AddressAutocomplete @select="onEditAddressSelect" />
+                                <LocationPicker
+                                    :initialAddress="editAddress"
+                                    :initialLat="editLat || undefined"
+                                    :initialLng="editLng || undefined"
+                                    @select="onEditAddressSelect"
+                                />
                             </div>
                             <p v-if="editError" class="text-red-600 text-xs">{{ editError }}</p>
                             <div class="flex gap-2">

@@ -1,15 +1,19 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { getAlerts, createAlert, toggleAlert, type Alert, type AlertSeverity } from '../api/alerts';
 import { useAuthStore } from '../stores/auth';
 import { getSocket } from '../api/socket';
-import AddressAutocomplete from '../components/AddressAutocomplete.vue';
+import LocationPicker from '../components/LocationPicker.vue';
+import AlertsMap from '../components/AlertsMap.vue';
 
 const authStore = useAuthStore();
 
 const alerts = ref<Alert[]>([]);
 const loading = ref(true);
 const error = ref('');
+
+const activeAlerts = computed(() => alerts.value.filter(a => a.isActive));
+const hasMapAlerts = computed(() => activeAlerts.value.some(a => a.lat != null));
 
 // Create modal
 const showModal = ref(false);
@@ -121,7 +125,7 @@ onUnmounted(() => {
 
 <template>
     <div class="min-h-screen bg-slate-50">
-        <div class="max-w-4xl mx-auto px-6 py-8">
+        <div class="max-w-6xl mx-auto px-6 py-8">
 
             <div class="flex items-center justify-between mb-6">
                 <div>
@@ -150,7 +154,18 @@ onUnmounted(() => {
                 {{ error }}
             </div>
 
-            <div v-else class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <template v-else>
+
+                <!-- Map — only shown when at least one active alert has coordinates -->
+                <div v-if="hasMapAlerts" class="mb-6 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                        <h2 class="text-sm font-semibold text-slate-700">Active Alert Locations</h2>
+                        <span class="text-xs text-slate-400">{{ activeAlerts.filter(a => a.lat != null).length }} pinned</span>
+                    </div>
+                    <AlertsMap :alerts="activeAlerts" />
+                </div>
+
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                 <table class="w-full text-sm">
                     <thead class="bg-slate-50 border-b border-slate-200">
                         <tr>
@@ -202,6 +217,8 @@ onUnmounted(() => {
                 </table>
             </div>
 
+            </template>
+
         </div>
     </div>
 
@@ -233,16 +250,13 @@ onUnmounted(() => {
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-slate-600 mb-1">Location <span class="text-slate-400 font-normal">(optional)</span></label>
-                    <AddressAutocomplete
-                        @select="({ address, lat, lng }) => {
-                            form.region = address;
+                    <LocationPicker
+                        @select="({ address, lat, lng, region }) => {
+                            form.region = region || address;
                             form.lat = lat || undefined;
                             form.lng = lng || undefined;
                         }"
                     />
-                    <p v-if="form.lat" class="text-xs text-slate-400 mt-1">
-                        Pinned: {{ form.lat.toFixed(4) }}, {{ form.lng?.toFixed(4) }}
-                    </p>
                 </div>
                 <p v-if="modalError" class="text-red-600 text-sm">{{ modalError }}</p>
                 <div class="flex justify-end gap-2 pt-2">

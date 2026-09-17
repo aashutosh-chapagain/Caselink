@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useCasesStore } from '../stores/cases';
 import { createCase, type Case, type CasePriority, type CaseType } from '../api/cases';
 import { getSocket } from '../api/socket';
-import AddressAutocomplete from '../components/AddressAutocomplete.vue';
+import LocationPicker from '../components/LocationPicker.vue';
 
 const casesStore = useCasesStore();
 
@@ -35,10 +35,11 @@ function openModal() {
     showModal.value = true;
 }
 
-function onAddressSelect(selected: { address: string; lat: number; lng: number }) {
+function onAddressSelect(selected: { address: string; lat: number; lng: number; region: string }) {
     form.value.address = selected.address;
     form.value.lat = selected.lat;
     form.value.lng = selected.lng;
+    if (selected.region) form.value.region = selected.region;
 }
 
 async function submitCase() {
@@ -316,7 +317,7 @@ function formatDate(iso: string) {
                     <label class="block text-sm font-medium text-slate-600 mb-1">
                         Address <span class="text-slate-400 font-normal">(optional)</span>
                     </label>
-                    <AddressAutocomplete @select="onAddressSelect" />
+                    <LocationPicker @select="onAddressSelect" />
                 </div>
 
                 <p v-if="modalError" class="text-red-600 text-sm">{{ modalError }}</p>
