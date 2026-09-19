@@ -6,8 +6,8 @@ export default defineConfig({
         environment: 'node',
         setupFiles: ['./src/tests/setup.ts'],
         testTimeout: 20000,
-        // run test files sequentially — mongodb-memory-server is shared across files
+        // run test files sequentially — each file shares the same in-memory MongoDB
         pool: 'forks',
-        forks: { singleFork: true },
+        fileParallelism: false,
     },
 });
