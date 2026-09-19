@@ -21,6 +21,7 @@ Caselink is a case management platform for emergency services / social work team
 | Auth — workspace registration | Done | Admin-only, unique workspace name enforced |
 | Auth — caseworker invite flow | Done | UUID token, 7-day expiry, single-use |
 | Team management | Done | Member list, invite modal, pending invites, revoke |
+| Profile page | Done | View account details, edit name, change password |
 | Case CRUD | Done | Create, read, update; soft-closed via status |
 | Case list — filter tabs | Done | All / Open / In Progress / Closed (paginated) |
 | Case list — map tab | Done | Active cases with coords, priority-coloured pins |
@@ -45,7 +46,6 @@ Caselink is a case management platform for emergency services / social work team
 
 | Feature | Priority | Notes |
 |---|---|---|
-| Password reset / change | Medium | No recovery path if password forgotten |
 | User deactivation | Medium | `isActive` field exists on User model, middleware check not wired |
 | Email sending | Low | Invite links are copy-paste for now; Resend/Nodemailer when needed |
 | Notifications | Low | In-app or push notifications for case assignments |
@@ -125,7 +125,7 @@ server/src/
                       # GET /invite/:token (public, pre-fill), POST /accept-invite (public, create caseworker)
     cases.ts          # CRUD under /api/v1/cases — emits case:created / case:updated via Socket.IO
     activities.ts     # GET/POST /api/v1/cases/:caseId/activities — emits activity:added
-    users.ts          # GET /api/v1/users — workspace-scoped user list; auth required
+    users.ts          # GET /users (workspace list), GET /users/me, PATCH /users/me (name), PATCH /users/me/password
     invites.ts        # POST / GET / DELETE /api/v1/invites — admin only (requireAuth + requireAdmin at router level)
     dashboard.ts      # GET /stats, GET /activity — aggregated workspace data
     alerts.ts         # GET /public (no auth), GET / POST / PATCH — alert management
@@ -149,7 +149,7 @@ client/src/
     publicClient.ts   # Axios instance without auth (for unauthenticated routes)
     cases.ts          # getCases, createCase, getCase, updateCase, getActivities, addActivity; Activity type includes 'update'
     alerts.ts         # getAlerts, getPublicAlerts, createAlert, toggleAlert; Alert / CreateAlertPayload types
-    users.ts          # getUsers() — returns WorkspaceUser[] for the reassign dropdown
+    users.ts          # getUsers(), getMyProfile(), updateMyProfile(name), changePassword(current, new)
     invites.ts        # createInvite, getInvites, revokeInvite (authed); getInvitePreview, acceptInvite (public)
     socket.ts         # Socket.IO singleton — getSocket() creates one connection per session; destroySocket() tears it down on logout
   stores/
@@ -163,6 +163,7 @@ client/src/
     RegisterView.vue      # New workspace + admin account creation
     AcceptInviteView.vue  # Public; validates token on mount, pre-fills email; creates caseworker account
     TeamManageView.vue    # Admin-only: member list, invite modal (generates link), pending invites + revoke
+    ProfileView.vue       # Account details (read-only) + inline name edit + change password form
     CaseListView.vue      # Filter tabs (All/Open/In Progress/Closed/Map) + create modal + Socket.IO
     CaseDetailView.vue    # Case header, status buttons, activity timeline, edit mode, add note form
     DashboardView.vue     # Stat cards, charts, stale cases, workload, activity feed, active alerts + map
@@ -200,6 +201,16 @@ client/src/
 **`isActive` on User model**: field exists (default `true`), but the middleware check is not yet wired. Add it to `requireAuth` when user deactivation is needed.
 
 ---
+
+### Profile page
+
+`GET /users/me` — returns the authenticated user's `name`, `email`, `role`, plus `workspaceName` (joined from Workspace collection). Used only by `ProfileView` on mount.
+
+`PATCH /users/me` — updates `name`. Returns the updated user document. After saving, `authStore.updateUser({ name })` is called to patch the in-memory store and re-persist to `localStorage` so the nav bar name updates immediately without a reload.
+
+`PATCH /users/me/password` — requires `{ currentPassword, newPassword }`. Verifies `currentPassword` against the stored bcrypt hash before accepting the new one; returns 401 if incorrect. Min 8 chars enforced server-side.
+
+The profile page uses the `PasswordInput` component for both password fields. Name editing is inline — the name row shows an "Edit" link; clicking it replaces the text with an input + Save/Cancel on the line below (stacked layout to avoid overflow on small screens). Enter saves, Escape cancels.
 
 ### Case fields
 
@@ -336,6 +347,7 @@ The REST API is intentionally structured for reuse by a future React Native clie
 - **`overflow-hidden` must be on a wrapper div, not the Leaflet map element** — putting it directly on the map container clips Leaflet controls. Only the tile area wrapper gets `overflow-hidden rounded-lg`.
 - **`PinMap` hover popup uses `autoPan: false`** — without this, hovering near map edge causes a distracting pan animation.
 - **Activity `type` enum must stay in sync** — server `Activity.ts` model enum, client `Activity` interface in `cases.ts`, `activityTypeStyles` record, and badge label expression in `CaseDetailView` all reference the same values. Adding a new type requires updating all four.
+- **`authStore.updateUser(fields)` must be called after any server-side profile update** — the JWT does not carry the user's name, so the store is the source of truth for what the nav bar shows. Forgetting this means the nav bar shows the old name until next login.
 - **`POST /auth/register` creates workspace + admin only** — it no longer joins existing workspaces. Caseworkers join via the invite flow exclusively.
 - **Invite token is a UUID stored in DB** — not a JWT. This allows revocation via `DELETE /invites/:id`. A JWT-based token could not be revoked without a blacklist.
 

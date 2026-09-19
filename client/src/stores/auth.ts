@@ -24,6 +24,11 @@ export const useAuthStore = defineStore('auth', {
             localStorage.setItem('token', token);
             localStorage.setItem('user', JSON.stringify(user));
         },
+        updateUser(fields: Partial<User>) {
+            if (!this.user) return;
+            this.user = { ...this.user, ...fields };
+            localStorage.setItem('user', JSON.stringify(this.user));
+        },
         logout() {
             this.token = null
             this.user = null

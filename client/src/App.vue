@@ -89,10 +89,14 @@ const severityBannerStyles: Record<string, string> = {
                 </div>
             </div>
             <div class="flex items-center gap-4">
-                <span class="text-sm text-slate-500">
+                <button
+                    @click="router.push('/profile')"
+                    class="text-sm text-slate-500 hover:text-slate-800 transition-colors"
+                    :class="$route.path === '/profile' ? 'text-blue-600 font-medium' : ''"
+                >
                     {{ authStore.user?.name }}
                     <span class="ml-1 text-xs px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{{ authStore.user?.role }}</span>
-                </span>
+                </button>
                 <button
                     @click="logout"
                     class="text-sm text-slate-500 hover:text-red-600 transition-colors"
