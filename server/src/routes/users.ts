@@ -40,7 +40,7 @@ router.patch('/me', async (req: AuthedRequest, res) => {
     const user = await User.findByIdAndUpdate(
         req.userId,
         { name: name.trim() },
-        { new: true, select: 'name email role' },
+        { returnDocument: 'after', select: 'name email role' },
     );
 
     if (!user) return res.status(404).json({ error: 'User not found' });

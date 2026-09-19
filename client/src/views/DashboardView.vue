@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { getDashboardStats, getDashboardActivity, type DashboardStats, type DashboardActivity } from '../api/dashboard';
 import { useAuthStore } from '../stores/auth';

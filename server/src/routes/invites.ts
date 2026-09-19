@@ -23,7 +23,7 @@ router.post('/', async (req, res) => {
     await Invite.findOneAndUpdate(
         { email: email.toLowerCase(), workspaceId: authedReq.workspaceId },
         { token, expiresAt, used: false, createdBy: authedReq.userId },
-        { upsert: true, new: true },
+        { upsert: true, returnDocument: 'after' },
     );
 
     const inviteUrl = `${process.env.CLIENT_URL ?? 'http://localhost:5173'}/accept-invite?token=${token}`;

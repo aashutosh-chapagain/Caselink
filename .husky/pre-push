@@ -1,0 +1,4 @@
+#!/bin/sh
+# Run server tests before push — block push if any test fails
+echo "Running server tests..."
+cd server && npm test

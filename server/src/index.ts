@@ -1,24 +1,13 @@
-import express from 'express';
-import cors from 'cors';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import authRoutes from './routes/auth';
-import caseRoutes from './routes/cases';
-import activityRoutes from './routes/activities';
-import userRoutes from './routes/users';
-import dashboardRoutes from './routes/dashboard';
-import alertRoutes from './routes/alerts';
-import inviteRoutes from './routes/invites';
+import { createApp } from './app';
 import jwt from 'jsonwebtoken';
 
 dotenv.config();
 
-const app = express();
-app.use(cors());
-app.use(express.json());
-
+const app = createApp();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: '*' } });
 
@@ -58,17 +47,6 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         console.log(`Socket disconnected: user ${socket.data.userId}`);
     });
-});
-
-app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1/users', userRoutes);
-app.use('/api/v1/cases', caseRoutes);
-app.use('/api/v1/cases', activityRoutes);
-app.use('/api/v1/dashboard', dashboardRoutes);
-app.use('/api/v1/alerts', alertRoutes);
-app.use('/api/v1/invites', inviteRoutes);
-app.get('/health', (_req, res) => {
-    res.json({ status: 'ok' });
 });
 
 const PORT = process.env.PORT || 5000;
