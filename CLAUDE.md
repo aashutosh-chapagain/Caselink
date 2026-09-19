@@ -54,12 +54,90 @@ Caselink is a case management platform for emergency services / social work team
 
 ---
 
+## Test Infrastructure
+
+### Overview
+
+Tests run against an in-memory MongoDB instance (`mongodb-memory-server`) — the real Atlas database is never touched. `JWT_SECRET` is set directly in `setup.ts`; no `.env` file is required to run tests.
+
+### Files
+
+```
+server/
+  vitest.config.mts          # Vitest config — globals, node env, singleFork, 20s timeout
+  src/tests/
+    setup.ts                 # Starts in-memory MongoDB, mounts mock Socket.IO, wipes DB after each test
+    helpers.ts               # registerAdmin(), registerCaseworker(), createCase() — shared test utilities
+    auth.test.ts             # 14 tests — register, login, full invite flow
+    cases.test.ts            # 17 tests — CRUD, role enforcement, workspaceId isolation
+    users.test.ts            # 10 tests — profile, password change, workspace scoping
+```
+
+### Key decisions
+
+- **`app.ts` factory** — `createApp()` returns the Express app without connecting to MongoDB or starting a listener. Tests import `app.ts`; the real server imports it too from `index.ts`. This is the standard pattern for making Express apps testable.
+- **`singleFork: true`** — all three test files share one process and one in-memory MongoDB instance. Without this, Vitest would spin up three separate MongoDB instances (one per file), wasting RAM and time.
+- **`afterEach` wipe** — every collection is wiped after each test so no test can depend on another's side effects (test isolation).
+- **Mock Socket.IO** — routes call `req.app.get('io').to(...).emit(...)`. Tests set a no-op mock: `app.set('io', { to: () => ({ emit: () => {} }) })`. Without this, any route that emits a socket event would throw in tests.
+- **`vitest.config.mts`** — `.mts` extension marks the config file as ESM. The server package uses `"type": "commonjs"`, so without `.mts` Vite would try to load the config as CommonJS and warn about ESM syntax.
+- **`"types": ["node", "vitest/globals"]` in `tsconfig.json`** — makes `beforeAll`, `afterEach`, `describe`, `it`, `expect` etc. available as globals without explicit imports in test files.
+
+### What the tests cover
+
+Tests focus on **security invariants** (workspaceId isolation, role enforcement) and **validation boundaries** — not implementation details or response shapes.
+
+- `workspaceId isolation` — admin from Workspace A cannot see cases or users from Workspace B
+- `role enforcement` — caseworker gets 403 on admin-only operations (reassign, create invites)
+- `single-use invite` — replaying an accepted invite token returns 400
+- `auth validation` — short passwords, duplicate emails, wrong credentials all return correct status codes
+
+---
+
+## Git workflow and CI
+
+### Branch strategy
+
+- `dev` — active development branch; all feature work goes here
+- `main` — protected; only receives merges from `dev` via pull request
+
+### Pre-push hook (Husky)
+
+Installed at the git root. Running `npm install` at the repo root wires it up automatically via the `prepare` script.
+
+```
+git push  →  .husky/pre-push runs  →  cd server && npm test
+           →  push blocked if any test fails
+```
+
+The hook lives at `.husky/pre-push`. It provides fast local feedback before code leaves the machine.
+
+### GitHub Actions CI (`.github/workflows/ci.yml`)
+
+Triggers on every push to `dev` and every PR targeting `dev` or `main`. Runs two parallel jobs:
+
+| Job | Command | What it checks |
+|---|---|---|
+| `server-tests` | `npm test` in `server/` | All 41 Vitest tests pass |
+| `client-typecheck` | `npm run build` in `client/` | `vue-tsc` type-check + Vite build succeeds |
+
+Both jobs use `npm ci` (not `npm install`) for reproducible, lockfile-exact installs. npm cache is keyed per sub-package lockfile so a client dependency change doesn't invalidate the server cache.
+
+To enforce CI as a required gate on PRs: **Settings → Branches → Branch protection rule for `main`** → enable "Require status checks" → select `Server tests` and `Client type-check`.
+
+---
+
 ## Commands
+
+### Root (git root — `Caselink/`)
+```bash
+npm install      # Installs husky and wires up the pre-push hook
+```
 
 ### Server (`cd server`)
 ```bash
 npm run dev      # Start with tsx watch (hot-reload)
 npm run seed     # Wipe DB and insert demo workspace + users + cases
+npm test         # Run all tests (vitest, in-memory MongoDB, no .env needed)
 ```
 
 ### Client (`cd client`)
@@ -68,8 +146,6 @@ npm run dev      # Vite dev server (hot-reload)
 npm run build    # Type-check then production build
 npm run preview  # Serve production build locally
 ```
-
-There are no test scripts configured in either package.
 
 ---
 
@@ -110,7 +186,8 @@ Every new query, route, or feature touching Case, Activity, Alert, or Invite **m
 
 ```
 server/src/
-  index.ts            # Express app setup, Socket.IO init, route registration
+  app.ts              # createApp() factory — Express app + all routes, no DB/server I/O (imported by tests and index.ts)
+  index.ts            # Server startup only — calls createApp(), connects MongoDB, starts Socket.IO + listener
   middleware/auth.ts  # requireAuth / requireAdmin middleware; extends Request with userId/workspaceId/role
   utils/jwt.ts        # signToken / verifyToken helpers (7-day expiry)
   models/
@@ -350,6 +427,8 @@ The REST API is intentionally structured for reuse by a future React Native clie
 - **`authStore.updateUser(fields)` must be called after any server-side profile update** — the JWT does not carry the user's name, so the store is the source of truth for what the nav bar shows. Forgetting this means the nav bar shows the old name until next login.
 - **`POST /auth/register` creates workspace + admin only** — it no longer joins existing workspaces. Caseworkers join via the invite flow exclusively.
 - **Invite token is a UUID stored in DB** — not a JWT. This allows revocation via `DELETE /invites/:id`. A JWT-based token could not be revoked without a blacklist.
+- **`findOneAndUpdate` / `findByIdAndUpdate` use `returnDocument: 'after'`** — Mongoose 9 deprecated `{ new: true }`; use `{ returnDocument: 'after' }` instead. Both options return the updated document, but `new: true` logs a deprecation warning.
+- **`process.env.JWT_SECRET` is not loaded in tests** — `dotenv.config()` only runs in `index.ts`, which tests never import. `setup.ts` sets `process.env.JWT_SECRET = 'test-secret'` directly. Any new env variable used in routes must be set in `setup.ts` if tests call those routes.
 
 ---
 
