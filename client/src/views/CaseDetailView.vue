@@ -98,6 +98,7 @@ const activityTypeStyles: Record<string, string> = {
     note: 'bg-slate-100 text-slate-600',
     status_change: 'bg-blue-50 text-blue-600',
     assignment: 'bg-purple-50 text-purple-600',
+    update: 'bg-amber-50 text-amber-600',
 };
 
 const priorityStyles: Record<CasePriority, string> = {
@@ -419,7 +420,7 @@ onUnmounted(() => {
                                         class="text-xs px-1.5 py-0.5 rounded font-medium"
                                         :class="activityTypeStyles[a.type]"
                                     >
-                                        {{ a.type === 'status_change' ? 'Status' : a.type === 'assignment' ? 'Assignment' : 'Note' }}
+                                        {{ a.type === 'status_change' ? 'Status' : a.type === 'assignment' ? 'Assignment' : a.type === 'update' ? 'Updated' : 'Note' }}
                                     </span>
                                     <span class="text-xs text-slate-400">{{ formatDateTime(a.createdAt) }}</span>
                                 </div>

@@ -6,6 +6,7 @@ const UserSchema = new Schema({
     passwordHash: { type: String, required: true },
     role: { type: String, enum: ['admin', 'caseworker'], required: true },
     workspaceId: { type: Schema.Types.ObjectId, ref: 'Workspace', required: true },
+    isActive: { type: Boolean, default: true },
 }, { timestamps: true });
 
 export default mongoose.model('User', UserSchema);

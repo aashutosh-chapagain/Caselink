@@ -64,7 +64,7 @@ export interface Activity {
     caseId: string;
     authorId: CaseUser | null;
     note: string;
-    type: 'note' | 'status_change' | 'assignment';
+    type: 'note' | 'status_change' | 'assignment' | 'update';
     workspaceId: string;
     createdAt: string;
     updatedAt: string;

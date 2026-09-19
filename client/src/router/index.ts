@@ -28,6 +28,22 @@ const router = createRouter({
             meta: { requiresAuth: true },
         },
         {
+            path: '/register',
+            name: 'register',
+            component: () => import('../views/RegisterView.vue'),
+        },
+        {
+            path: '/accept-invite',
+            name: 'accept-invite',
+            component: () => import('../views/AcceptInviteView.vue'),
+        },
+        {
+            path: '/team',
+            name: 'team',
+            component: () => import('../views/TeamManageView.vue'),
+            meta: { requiresAuth: true, requiresAdmin: true },
+        },
+        {
             path: '/alerts',
             name: 'public-alerts',
             component: () => import('../views/PublicAlertsView.vue'),
@@ -43,7 +59,8 @@ const router = createRouter({
 
 router.beforeEach((to) => {
     const authStore = useAuthStore()
-    if (to.name === 'login' && authStore.isAuthenticated) {
+    const guestOnlyRoutes = ['login', 'register', 'accept-invite']
+    if (guestOnlyRoutes.includes(to.name as string) && authStore.isAuthenticated) {
         return { name: 'dashboard' }
     }
     if (to.meta.requiresAuth && !authStore.isAuthenticated) {

@@ -3,6 +3,7 @@ import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import publicClient from '../api/publicClient';
+import PasswordInput from '../components/PasswordInput.vue';
 
 const email = ref('');
 const password = ref('');
@@ -49,12 +50,7 @@ async function handleLogin() {
             </div>
             <div>
                 <label class="block text-sm font-medium text-slate-600 mb-1">Password</label>
-                <input 
-                      v-model="password"
-                      type="password"
-                      required
-                      class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
-                      />
+                <PasswordInput v-model="password" required />
             </div>
             <p v-if="error" class="text-red-600 text-sm">{{ error }}</p>
 
@@ -67,5 +63,10 @@ async function handleLogin() {
             </button>
 
         </form>
+
+        <p class="text-sm text-center text-slate-500 mt-4 px-4">
+            New organisation?
+            <router-link to="/register" class="text-blue-600 hover:underline">Create a workspace</router-link>
+        </p>
     </div>
 </template>

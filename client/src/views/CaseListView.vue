@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { useCasesStore } from '../stores/cases';
 import { createCase, type Case, type CasePriority, type CaseType } from '../api/cases';
 import { getSocket } from '../api/socket';
 import LocationPicker from '../components/LocationPicker.vue';
+import CasesMap from '../components/CasesMap.vue';
+
+const router = useRouter();
 
 const casesStore = useCasesStore();
 
@@ -69,14 +73,15 @@ const tabs = [
     { label: 'Open', value: 'open' },
     { label: 'In Progress', value: 'in_progress' },
     { label: 'Closed', value: 'closed' },
+    { label: 'Map', value: 'map' },
 ];
 
 const activeTab = ref<string | undefined>(undefined);
 
 const displayedCases = computed(() => {
     if (activeTab.value === 'closed') return casesStore.closedCases;
-    if (activeTab.value) return casesStore.activeCases.filter(c => c.status === activeTab.value);
-    return casesStore.activeCases;
+    if (activeTab.value === 'map' || activeTab.value === undefined) return casesStore.activeCases;
+    return casesStore.activeCases.filter(c => c.status === activeTab.value);
 });
 
 const isLoading = computed(() =>
@@ -89,6 +94,10 @@ function selectTab(value: string | undefined) {
         casesStore.fetchClosedCases();
     }
 }
+
+const mappableCases = computed(() =>
+    casesStore.activeCases.filter(c => c.lat != null && c.lng != null)
+);
 
 const socket = getSocket();
 
@@ -187,66 +196,92 @@ function formatDate(iso: string) {
             <!-- Loading -->
             <div v-if="isLoading" class="text-slate-500 text-sm">Loading cases...</div>
 
-            <!-- Table -->
-            <div v-else class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                <table class="w-full text-sm">
-                    <thead class="bg-slate-50 border-b border-slate-200">
-                        <tr>
-                            <th class="text-left px-4 py-3 font-medium text-slate-600">Title</th>
-                            <th class="text-left px-4 py-3 font-medium text-slate-600">Type</th>
-                            <th class="text-left px-4 py-3 font-medium text-slate-600">Priority</th>
-                            <th class="text-left px-4 py-3 font-medium text-slate-600">Status</th>
-                            <th class="text-left px-4 py-3 font-medium text-slate-600">Region</th>
-                            <th class="text-left px-4 py-3 font-medium text-slate-600">Assigned To</th>
-                            <th class="text-left px-4 py-3 font-medium text-slate-600">Created</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr v-if="displayedCases.length === 0">
-                            <td colspan="7" class="px-4 py-8 text-center text-slate-400">No cases found.</td>
-                        </tr>
-                        <tr
-                            v-for="c in displayedCases"
-                            :key="c._id"
-                            class="border-b border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer"
-                            @click="$router.push(`/cases/${c._id}`)"
-                        >
-                            <td class="px-4 py-3 font-medium text-slate-800">{{ c.title }}</td>
-                            <td class="px-4 py-3 text-slate-600 text-xs">{{ typeLabel[c.type] ?? c.type }}</td>
-                            <td class="px-4 py-3">
-                                <span
-                                    class="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
-                                    :class="priorityStyles[c.priority]"
-                                >
-                                    {{ priorityLabel[c.priority] }}
-                                </span>
-                            </td>
-                            <td class="px-4 py-3">
-                                <span
-                                    class="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
-                                    :class="statusStyles[c.status]"
-                                >
-                                    {{ statusLabel[c.status] }}
-                                </span>
-                            </td>
-                            <td class="px-4 py-3 text-slate-600">{{ c.region }}</td>
-                            <td class="px-4 py-3 text-slate-600">{{ c.assignedTo?.name ?? '—' }}</td>
-                            <td class="px-4 py-3 text-slate-500">{{ formatDate(c.createdAt) }}</td>
-                        </tr>
-                    </tbody>
-                </table>
+            <template v-else>
 
-                <!-- Load more (closed tab only) -->
-                <div v-if="activeTab === 'closed' && casesStore.closedHasMore" class="px-4 py-3 border-t border-slate-100 text-center">
-                    <button
-                        @click="casesStore.loadMoreClosed()"
-                        :disabled="casesStore.closedLoading"
-                        class="text-sm text-blue-600 hover:text-blue-700 font-medium disabled:opacity-50"
-                    >
-                        {{ casesStore.closedLoading ? 'Loading...' : 'Load more' }}
-                    </button>
+                <!-- Map view -->
+                <div v-if="activeTab === 'map'" class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                        <span class="text-sm font-semibold text-slate-700">Active case locations</span>
+                        <span class="text-xs text-slate-400">{{ mappableCases.length }} pinned</span>
+                    </div>
+                    <div v-if="mappableCases.length === 0" class="px-4 py-8 text-center text-slate-400 text-sm">
+                        No active cases with location data.
+                    </div>
+                    <div v-else class="p-3">
+                        <CasesMap :cases="mappableCases" @pin-click="router.push(`/cases/${$event}`)" />
+                    </div>
+                    <!-- Legend -->
+                    <div class="px-4 py-3 border-t border-slate-100 flex items-center gap-4">
+                        <span class="text-xs text-slate-400 font-medium">Priority:</span>
+                        <span v-for="(color, label) in { Critical: '#ef4444', High: '#f97316', Medium: '#eab308', Low: '#22c55e' }" :key="label" class="flex items-center gap-1 text-xs text-slate-600">
+                            <span class="inline-block w-2.5 h-2.5 rounded-full" :style="{ background: color }"></span>
+                            {{ label }}
+                        </span>
+                    </div>
                 </div>
-            </div>
+
+                <!-- Table view -->
+                <div v-else class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                    <table class="w-full text-sm">
+                        <thead class="bg-slate-50 border-b border-slate-200">
+                            <tr>
+                                <th class="text-left px-4 py-3 font-medium text-slate-600">Title</th>
+                                <th class="text-left px-4 py-3 font-medium text-slate-600">Type</th>
+                                <th class="text-left px-4 py-3 font-medium text-slate-600">Priority</th>
+                                <th class="text-left px-4 py-3 font-medium text-slate-600">Status</th>
+                                <th class="text-left px-4 py-3 font-medium text-slate-600">Region</th>
+                                <th class="text-left px-4 py-3 font-medium text-slate-600">Assigned To</th>
+                                <th class="text-left px-4 py-3 font-medium text-slate-600">Created</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-if="displayedCases.length === 0">
+                                <td colspan="7" class="px-4 py-8 text-center text-slate-400">No cases found.</td>
+                            </tr>
+                            <tr
+                                v-for="c in displayedCases"
+                                :key="c._id"
+                                class="border-b border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer"
+                                @click="$router.push(`/cases/${c._id}`)"
+                            >
+                                <td class="px-4 py-3 font-medium text-slate-800">{{ c.title }}</td>
+                                <td class="px-4 py-3 text-slate-600 text-xs">{{ typeLabel[c.type] ?? c.type }}</td>
+                                <td class="px-4 py-3">
+                                    <span
+                                        class="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
+                                        :class="priorityStyles[c.priority]"
+                                    >
+                                        {{ priorityLabel[c.priority] }}
+                                    </span>
+                                </td>
+                                <td class="px-4 py-3">
+                                    <span
+                                        class="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
+                                        :class="statusStyles[c.status]"
+                                    >
+                                        {{ statusLabel[c.status] }}
+                                    </span>
+                                </td>
+                                <td class="px-4 py-3 text-slate-600">{{ c.region }}</td>
+                                <td class="px-4 py-3 text-slate-600">{{ c.assignedTo?.name ?? '—' }}</td>
+                                <td class="px-4 py-3 text-slate-500">{{ formatDate(c.createdAt) }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <!-- Load more (closed tab only) -->
+                    <div v-if="activeTab === 'closed' && casesStore.closedHasMore" class="px-4 py-3 border-t border-slate-100 text-center">
+                        <button
+                            @click="casesStore.loadMoreClosed()"
+                            :disabled="casesStore.closedLoading"
+                            class="text-sm text-blue-600 hover:text-blue-700 font-medium disabled:opacity-50"
+                        >
+                            {{ casesStore.closedLoading ? 'Loading...' : 'Load more' }}
+                        </button>
+                    </div>
+                </div>
+
+            </template>
         </div>
     </div>
 

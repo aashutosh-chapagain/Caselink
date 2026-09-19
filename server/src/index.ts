@@ -10,6 +10,7 @@ import activityRoutes from './routes/activities';
 import userRoutes from './routes/users';
 import dashboardRoutes from './routes/dashboard';
 import alertRoutes from './routes/alerts';
+import inviteRoutes from './routes/invites';
 import jwt from 'jsonwebtoken';
 
 dotenv.config();
@@ -65,6 +66,7 @@ app.use('/api/v1/cases', caseRoutes);
 app.use('/api/v1/cases', activityRoutes);
 app.use('/api/v1/dashboard', dashboardRoutes);
 app.use('/api/v1/alerts', alertRoutes);
+app.use('/api/v1/invites', inviteRoutes);
 app.get('/health', (_req, res) => {
     res.json({ status: 'ok' });
 });

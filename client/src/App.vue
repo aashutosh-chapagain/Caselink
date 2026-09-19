@@ -78,6 +78,14 @@ const severityBannerStyles: Record<string, string> = {
                     >
                         Alerts
                     </button>
+                    <button
+                        v-if="authStore.isAdmin"
+                        @click="router.push('/team')"
+                        class="text-slate-500 hover:text-slate-800 transition-colors"
+                        :class="$route.path === '/team' ? 'text-blue-600 font-medium' : ''"
+                    >
+                        Team
+                    </button>
                 </div>
             </div>
             <div class="flex items-center gap-4">

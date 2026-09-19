@@ -155,6 +155,15 @@ router.patch('/:id', async (req: AuthedRequest, res) => {
     const activityLogs: Promise<any>[] = [];
 
     if (title !== undefined && title.trim() !== existing.title) {
+        activityLogs.push(
+            Activity.create({
+                caseId: existing._id,
+                authorId: req.userId,
+                note: `Title changed from "${existing.title}" to "${title.trim()}"`,
+                type: 'update',
+                workspaceId: req.workspaceId,
+            })
+        );
         existing.title = title.trim();
     }
 
@@ -163,7 +172,20 @@ router.patch('/:id', async (req: AuthedRequest, res) => {
     }
 
     if (address !== undefined) {
-        existing.address = address || undefined;
+        const oldAddress = existing.address;
+        const newAddress = address || undefined;
+        if (newAddress !== oldAddress) {
+            activityLogs.push(
+                Activity.create({
+                    caseId: existing._id,
+                    authorId: req.userId,
+                    note: newAddress ? `Address updated to "${newAddress}"` : 'Address removed',
+                    type: 'update',
+                    workspaceId: req.workspaceId,
+                })
+            );
+        }
+        existing.address = newAddress;
         existing.lat = address ? lat : undefined;
         existing.lng = address ? lng : undefined;
     }
