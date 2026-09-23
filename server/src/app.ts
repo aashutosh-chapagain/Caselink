@@ -7,6 +7,7 @@ import userRoutes from './routes/users';
 import dashboardRoutes from './routes/dashboard';
 import alertRoutes from './routes/alerts';
 import inviteRoutes from './routes/invites';
+import notificationRoutes from './routes/notifications';
 
 export function createApp() {
     const app = express();
@@ -20,6 +21,7 @@ export function createApp() {
     app.use('/api/v1/dashboard', dashboardRoutes);
     app.use('/api/v1/alerts', alertRoutes);
     app.use('/api/v1/invites', inviteRoutes);
+    app.use('/api/v1/notifications', notificationRoutes);
     app.get('/health', (_req, res) => { res.json({ status: 'ok' }); });
 
     return app;

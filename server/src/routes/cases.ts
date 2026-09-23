@@ -2,6 +2,7 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import CaseModel from '../models/Case';
 import Activity from '../models/Activity';
+import Notification from '../models/Notification';
 import { requireAuth, AuthedRequest } from '../middleware/auth';
 
 const router = Router();
@@ -216,8 +217,10 @@ router.patch('/:id', async (req: AuthedRequest, res) => {
         );
     }
 
+    let notifyAssignee = false;
     if (assignedTo !== undefined && assignedTo !== existing.assignedTo?.toString()) {
         existing.assignedTo = assignedTo;
+        notifyAssignee = assignedTo !== req.userId; // don't notify self-assignment
 
         activityLogs.push(
             Activity.create({
@@ -237,6 +240,17 @@ router.patch('/:id', async (req: AuthedRequest, res) => {
     }
 
     await existing.save();
+
+    if (notifyAssignee) {
+        const notification = await Notification.create({
+            userId: assignedTo,
+            workspaceId: req.workspaceId,
+            type: 'assignment',
+            message: `You were assigned: "${existing.title}"`,
+            caseId: existing._id,
+        });
+        req.app.get('io').to(`user:${assignedTo}`).emit('notification:new', notification);
+    }
 
     const createdActivities = await Promise.all(activityLogs);
     await Promise.all(
