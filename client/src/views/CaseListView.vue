@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useCasesStore } from '../stores/cases';
-import { createCase, type Case, type CasePriority, type CaseType } from '../api/cases';
+import { getCases, createCase, type Case, type CasePriority, type CaseType } from '../api/cases';
 import { getSocket } from '../api/socket';
 import LocationPicker from '../components/LocationPicker.vue';
 import CasesMap from '../components/CasesMap.vue';
@@ -78,26 +78,58 @@ const tabs = [
 
 const activeTab = ref<string | undefined>(undefined);
 
+// Search state
+const searchQuery = ref('');
+const searchResults = ref<Case[]>([]);
+const searchLoading = ref(false);
+const isSearching = computed(() => searchQuery.value.trim().length > 0);
+let searchDebounce: ReturnType<typeof setTimeout> | null = null;
+
+watch(searchQuery, (val) => {
+    if (searchDebounce) clearTimeout(searchDebounce);
+    if (!val.trim()) {
+        searchResults.value = [];
+        return;
+    }
+    searchDebounce = setTimeout(async () => {
+        searchLoading.value = true;
+        try {
+            const res = await getCases({ search: val.trim() });
+            searchResults.value = res.data.cases;
+        } catch {
+            searchResults.value = [];
+        } finally {
+            searchLoading.value = false;
+        }
+    }, 300);
+});
+
 const displayedCases = computed(() => {
+    if (isSearching.value) {
+        if (!activeTab.value || activeTab.value === 'map') return searchResults.value;
+        return searchResults.value.filter(c => c.status === activeTab.value);
+    }
     if (activeTab.value === 'closed') return casesStore.closedCases;
     if (activeTab.value === 'map' || activeTab.value === undefined) return casesStore.activeCases;
     return casesStore.activeCases.filter(c => c.status === activeTab.value);
 });
 
-const isLoading = computed(() =>
-    activeTab.value === 'closed' ? casesStore.closedLoading : casesStore.loading
-);
+const isLoading = computed(() => {
+    if (isSearching.value) return searchLoading.value;
+    return activeTab.value === 'closed' ? casesStore.closedLoading : casesStore.loading;
+});
 
 function selectTab(value: string | undefined) {
     activeTab.value = value;
-    if (value === 'closed' && casesStore.closedCases.length === 0) {
+    if (!isSearching.value && value === 'closed' && casesStore.closedCases.length === 0) {
         casesStore.fetchClosedCases();
     }
 }
 
-const mappableCases = computed(() =>
-    casesStore.activeCases.filter(c => c.lat != null && c.lng != null)
-);
+const mappableCases = computed(() => {
+    const source = isSearching.value ? searchResults.value : casesStore.activeCases;
+    return source.filter(c => c.lat != null && c.lng != null);
+});
 
 const socket = getSocket();
 
@@ -173,6 +205,29 @@ function formatDate(iso: string) {
                 </button>
             </div>
 
+            <!-- Search -->
+            <div class="relative mb-4">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+                </svg>
+                <input
+                    v-model="searchQuery"
+                    type="text"
+                    placeholder="Search by title, description, region, or address..."
+                    class="w-full border border-slate-300 rounded-lg pl-9 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                <button
+                    v-if="searchQuery"
+                    @click="searchQuery = ''"
+                    class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    type="button"
+                >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+
             <!-- Filter tabs -->
             <div class="flex gap-1 mb-6 border-b border-slate-200">
                 <button
@@ -236,7 +291,9 @@ function formatDate(iso: string) {
                         </thead>
                         <tbody>
                             <tr v-if="displayedCases.length === 0">
-                                <td colspan="7" class="px-4 py-8 text-center text-slate-400">No cases found.</td>
+                                <td colspan="7" class="px-4 py-8 text-center text-slate-400">
+                                    {{ isSearching ? `No cases found matching "${searchQuery}".` : 'No cases found.' }}
+                                </td>
                             </tr>
                             <tr
                                 v-for="c in displayedCases"
@@ -269,8 +326,8 @@ function formatDate(iso: string) {
                         </tbody>
                     </table>
 
-                    <!-- Load more (closed tab only) -->
-                    <div v-if="activeTab === 'closed' && casesStore.closedHasMore" class="px-4 py-3 border-t border-slate-100 text-center">
+                    <!-- Load more (closed tab only, not during search) -->
+                    <div v-if="!isSearching && activeTab === 'closed' && casesStore.closedHasMore" class="px-4 py-3 border-t border-slate-100 text-center">
                         <button
                             @click="casesStore.loadMoreClosed()"
                             :disabled="casesStore.closedLoading"

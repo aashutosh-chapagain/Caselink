@@ -43,7 +43,7 @@ export interface CasesResponse {
     hasMore: boolean;
 }
 
-export function getCases(params?: { status?: string; cursor?: string; limit?: number }) {
+export function getCases(params?: { status?: string; cursor?: string; limit?: number; search?: string }) {
     return client.get<CasesResponse>('/cases', { params });
 }
 

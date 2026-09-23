@@ -213,3 +213,79 @@ describe('PATCH /cases/:id', () => {
         expect(res.status).toBe(400);
     });
 });
+
+describe('GET /cases?search=', () => {
+    it('returns cases matching the title', async () => {
+        const { token } = await registerAdmin();
+        await createCase(token, { title: 'Fire on Main Street' });
+        await createCase(token, { title: 'Welfare check — elderly resident' });
+
+        const res = await request(app)
+            .get('/api/v1/cases?search=fire')
+            .set('Authorization', `Bearer ${token}`);
+        expect(res.status).toBe(200);
+        expect(res.body.cases.length).toBe(1);
+        expect(res.body.cases[0].title).toBe('Fire on Main Street');
+    });
+
+    it('search is case-insensitive', async () => {
+        const { token } = await registerAdmin();
+        await createCase(token, { title: 'HAZMAT Incident' });
+
+        const res = await request(app)
+            .get('/api/v1/cases?search=hazmat')
+            .set('Authorization', `Bearer ${token}`);
+        expect(res.body.cases.length).toBe(1);
+    });
+
+    it('matches on region', async () => {
+        const { token } = await registerAdmin();
+        await createCase(token, { title: 'Case A', region: 'Fremantle' });
+        await createCase(token, { title: 'Case B', region: 'Perth CBD' });
+
+        const res = await request(app)
+            .get('/api/v1/cases?search=fremantle')
+            .set('Authorization', `Bearer ${token}`);
+        expect(res.body.cases.length).toBe(1);
+        expect(res.body.cases[0].title).toBe('Case A');
+    });
+
+    it('returns empty array when nothing matches', async () => {
+        const { token } = await registerAdmin();
+        await createCase(token, { title: 'Routine check' });
+
+        const res = await request(app)
+            .get('/api/v1/cases?search=zzznomatch')
+            .set('Authorization', `Bearer ${token}`);
+        expect(res.body.cases.length).toBe(0);
+    });
+
+    it('search composes with status filter', async () => {
+        const { token } = await registerAdmin();
+        const caseId = await createCase(token, { title: 'Fire incident alpha' });
+        await createCase(token, { title: 'Fire incident beta' });
+        // Close one of the fire cases
+        await request(app)
+            .patch(`/api/v1/cases/${caseId}`)
+            .set('Authorization', `Bearer ${token}`)
+            .send({ status: 'closed' });
+
+        const res = await request(app)
+            .get('/api/v1/cases?search=fire&status=open')
+            .set('Authorization', `Bearer ${token}`);
+        expect(res.body.cases.length).toBe(1);
+        expect(res.body.cases[0].title).toBe('Fire incident beta');
+    });
+
+    it('does not return matching cases from another workspace', async () => {
+        const { token: adminA } = await registerAdmin({ workspaceName: 'WS-A', email: 'a@test.com' });
+        const { token: adminB } = await registerAdmin({ workspaceName: 'WS-B', email: 'b@test.com' });
+        await createCase(adminA, { title: 'Rescue operation' });
+        await createCase(adminB, { title: 'Rescue operation' });
+
+        const res = await request(app)
+            .get('/api/v1/cases?search=rescue')
+            .set('Authorization', `Bearer ${adminA}`);
+        expect(res.body.cases.length).toBe(1);
+    });
+});

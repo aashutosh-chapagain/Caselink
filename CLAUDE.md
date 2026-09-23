@@ -24,6 +24,7 @@ Caselink is a case management platform for emergency services / social work team
 | Profile page | Done | View account details, edit name, change password |
 | Case CRUD | Done | Create, read, update; soft-closed via status |
 | Case list — filter tabs | Done | All / Open / In Progress / Closed (paginated) |
+| Case search | Done | Keyword search across title, description, region, address; composes with tab filters |
 | Case list — map tab | Done | Active cases with coords, priority-coloured pins |
 | Case detail | Done | Header, status buttons, edit mode, activity timeline |
 | Case activity timeline | Done | Notes, status changes, reassignments, field edits |
@@ -341,6 +342,18 @@ Activity badge colours in CaseDetailView: note=slate, status_change=blue, assign
 - `pin-click` navigates to `/cases/:id`
 - Pin count and priority legend shown in card header/footer
 - Cases without coordinates are excluded silently (only appear in list tabs)
+
+### Case search
+
+`GET /cases?search=<query>` — composes with all existing filters (`status`, role scoping, `workspaceId`). The `search` param adds a `$or` regex match across `title`, `description`, `region`, and `address` fields. User input is regex-escaped before use to prevent unexpected behaviour.
+
+Client behaviour in `CaseListView`:
+- Search input sits above the filter tabs and affects all tabs simultaneously
+- 300ms debounce — request fires only after the user stops typing
+- When `searchQuery` is non-empty, results are fetched directly from the server (bypassing the Pinia store) and stored in a local `searchResults` ref; tab filtering is then applied client-side on those results
+- When `searchQuery` is cleared, the view reverts to the normal store-backed display
+- "Load more" (closed tab pagination) is hidden while searching
+- Map tab shows mappable cases from `searchResults` when searching
 
 ### Case list ordering
 

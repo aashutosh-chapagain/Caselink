@@ -10,7 +10,7 @@ router.use(requireAuth);
 
 // GET /api/v1/cases - list cases (scoped by workspace + role)
 router.get('/', async (req: AuthedRequest, res) => {
-    const { status, cursor, limit } = req.query as Record<string, string>;
+    const { status, cursor, limit, search } = req.query as Record<string, string>;
 
     // Aggregation requires explicit ObjectId casting — unlike find(), $match does not auto-cast strings.
     const filter: Record<string, unknown> = {
@@ -24,6 +24,17 @@ router.get('/', async (req: AuthedRequest, res) => {
     if (status) {
         const statuses = status.split(',');
         filter.status = statuses.length > 1 ? { $in: statuses } : statuses[0];
+    }
+
+    if (search && search.trim()) {
+        // Escape special regex chars to prevent injection / unexpected behaviour
+        const escaped = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        filter.$or = [
+            { title:       { $regex: escaped, $options: 'i' } },
+            { description: { $regex: escaped, $options: 'i' } },
+            { region:      { $regex: escaped, $options: 'i' } },
+            { address:     { $regex: escaped, $options: 'i' } },
+        ];
     }
 
     const isClosedPage = status === 'closed';
