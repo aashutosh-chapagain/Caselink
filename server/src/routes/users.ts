@@ -2,7 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import User from '../models/User';
 import Workspace from '../models/Workspace';
-import { requireAuth, AuthedRequest } from '../middleware/auth';
+import { requireAuth, requireAdmin, AuthedRequest } from '../middleware/auth';
 
 const router = Router();
 
@@ -11,7 +11,7 @@ router.use(requireAuth);
 // GET /api/v1/users - list all users in the caller's workspace
 router.get('/', async (req: AuthedRequest, res) => {
     const users = await User.find({ workspaceId: req.workspaceId })
-        .select('name email role')
+        .select('name email role isActive')
         .sort({ name: 1 });
 
     res.json(users);
@@ -46,6 +46,21 @@ router.patch('/me', async (req: AuthedRequest, res) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     res.json(user);
+});
+
+// PATCH /api/v1/users/:id/active — toggle isActive (admin only, cannot self-deactivate)
+router.patch('/:id/active', requireAdmin, async (req: AuthedRequest, res) => {
+    if (req.params.id === req.userId) {
+        return res.status(400).json({ error: 'You cannot deactivate your own account' });
+    }
+
+    const user = await User.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    user.isActive = !user.isActive;
+    await user.save();
+
+    res.json({ _id: user._id, name: user.name, email: user.email, role: user.role, isActive: user.isActive });
 });
 
 // PATCH /api/v1/users/me/password - change own password

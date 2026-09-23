@@ -47,7 +47,7 @@ Caselink is a case management platform for emergency services / social work team
 
 | Feature | Priority | Notes |
 |---|---|---|
-| User deactivation | Medium | `isActive` field exists on User model, middleware check not wired |
+| User deactivation | Done | Admin toggle in team view; `requireAuth` checks DB on every request; login blocked with clear message |
 | Email sending | Low | Invite links are copy-paste for now; Resend/Nodemailer when needed |
 | Notifications | Low | In-app or push notifications for case assignments |
 | File attachments on cases | Low | Evidence photos, documents |
@@ -276,9 +276,23 @@ client/src/
 
 **Logout** is entirely client-side — auth store cleared, localStorage wiped, redirect to `/`. JWTs remain cryptographically valid until 7-day expiry but client can't send them.
 
-**`isActive` on User model**: field exists (default `true`), but the middleware check is not yet wired. Add it to `requireAuth` when user deactivation is needed.
+**`isActive` on User model**: enforced in two places — `requireAuth` middleware (DB check on every request) and `POST /auth/login` (checked after password verification). Deactivation takes effect immediately without waiting for JWT expiry.
 
 ---
+
+### User deactivation
+
+`PATCH /api/v1/users/:id/active` — admin only; toggles `isActive` on the target user. Server decides the new value (`!user.isActive`) — client sends no body. Two guards:
+- Cannot deactivate yourself (`req.params.id === req.userId` → 400)
+- Must be in the same workspace (`findOne` includes `workspaceId` filter → 404 if not found)
+
+`requireAuth` middleware hits MongoDB on every authenticated request to check `isActive`. Deactivation takes effect immediately — no need to wait for the JWT to expire. Query uses `.select('isActive')` to fetch only the one field needed.
+
+`POST /auth/login` also checks `isActive` **after** password verification. The check is ordered this way intentionally: checking before password verification would let an attacker probe whether a given email is deactivated without knowing the password.
+
+`GET /api/v1/users` includes `isActive` in the select so the team management UI can show Active/Inactive badges and the deactivate/reactivate button correctly.
+
+Client: `TeamManageView` shows all members (active + inactive). Inactive rows are dimmed with `opacity-50`. The toggle button is hidden for your own row (`m._id !== authStore.user?.id`) since self-deactivation is blocked server-side anyway.
 
 ### Profile page
 
@@ -441,6 +455,8 @@ The REST API is intentionally structured for reuse by a future React Native clie
 - **`POST /auth/register` creates workspace + admin only** — it no longer joins existing workspaces. Caseworkers join via the invite flow exclusively.
 - **Invite token is a UUID stored in DB** — not a JWT. This allows revocation via `DELETE /invites/:id`. A JWT-based token could not be revoked without a blacklist.
 - **`findOneAndUpdate` / `findByIdAndUpdate` use `returnDocument: 'after'`** — Mongoose 9 deprecated `{ new: true }`; use `{ returnDocument: 'after' }` instead. Both options return the updated document, but `new: true` logs a deprecation warning.
+- **`requireAuth` now makes a DB call on every request** — added when user deactivation was wired. Uses `.select('isActive')` to keep it minimal. If performance becomes a concern at scale, add a Redis cache keyed by `userId` with a short TTL.
+- **Login checks `isActive` after password verification, not before** — checking before would let an attacker learn that an account exists (and is deactivated) without knowing the password. Always verify credentials first, then reveal account state.
 - **`process.env.JWT_SECRET` is not loaded in tests** — `dotenv.config()` only runs in `index.ts`, which tests never import. `setup.ts` sets `process.env.JWT_SECRET = 'test-secret'` directly. Any new env variable used in routes must be set in `setup.ts` if tests call those routes.
 
 ---

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { app } from './setup';
-import { registerAdmin } from './helpers';
+import { registerAdmin, registerCaseworker } from './helpers';
 
 describe('POST /auth/register', () => {
     it('creates a workspace and admin, returns a token', async () => {
@@ -76,6 +76,23 @@ describe('POST /auth/login', () => {
             password: 'password123',
         });
         expect(res.status).toBe(401);
+    });
+
+    it('rejects login for a deactivated account with a clear message', async () => {
+        const { token: adminToken } = await registerAdmin();
+        const { userId: workerId } = await registerCaseworker(adminToken);
+
+        // Deactivate the caseworker
+        await request(app)
+            .patch(`/api/v1/users/${workerId}/active`)
+            .set('Authorization', `Bearer ${adminToken}`);
+
+        const res = await request(app).post('/api/v1/auth/login').send({
+            email: 'worker@test.com',
+            password: 'password123',
+        });
+        expect(res.status).toBe(401);
+        expect(res.body.error).toMatch(/deactivated/i);
     });
 });
 

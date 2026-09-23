@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { getUsers, type WorkspaceUser } from '../api/users';
+import { getUsers, toggleUserActive, type WorkspaceUser } from '../api/users';
 import { getInvites, createInvite, revokeInvite, type Invite } from '../api/invites';
+import { useAuthStore } from '../stores/auth';
+
+const authStore = useAuthStore();
 
 const members = ref<WorkspaceUser[]>([]);
 const invites = ref<Invite[]>([]);
@@ -61,6 +64,19 @@ async function copyLink() {
     setTimeout(() => { copied.value = false; }, 2000);
 }
 
+const toggling = ref<Set<string>>(new Set());
+async function handleToggleActive(member: WorkspaceUser) {
+    if (toggling.value.has(member._id)) return;
+    toggling.value.add(member._id);
+    try {
+        const res = await toggleUserActive(member._id);
+        const idx = members.value.findIndex(m => m._id === member._id);
+        if (idx !== -1) members.value[idx] = res.data;
+    } finally {
+        toggling.value.delete(member._id);
+    }
+}
+
 const revoking = ref<Set<string>>(new Set());
 async function handleRevoke(id: string) {
     if (revoking.value.has(id)) return;
@@ -116,16 +132,42 @@ const roleStyles: Record<string, string> = {
                                 <th class="text-left px-4 py-3 font-medium text-slate-600">Name</th>
                                 <th class="text-left px-4 py-3 font-medium text-slate-600">Email</th>
                                 <th class="text-left px-4 py-3 font-medium text-slate-600">Role</th>
+                                <th class="text-left px-4 py-3 font-medium text-slate-600">Status</th>
+                                <th class="px-4 py-3"></th>
                             </tr>
                         </thead>
                         <tbody>
-                            <tr v-for="m in members" :key="m._id" class="border-b border-slate-100 last:border-0">
+                            <tr
+                                v-for="m in members"
+                                :key="m._id"
+                                class="border-b border-slate-100 last:border-0"
+                                :class="{ 'opacity-50': !m.isActive }"
+                            >
                                 <td class="px-4 py-3 font-medium text-slate-800">{{ m.name }}</td>
                                 <td class="px-4 py-3 text-slate-600">{{ m.email }}</td>
                                 <td class="px-4 py-3">
                                     <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium" :class="roleStyles[m.role]">
                                         {{ m.role }}
                                     </span>
+                                </td>
+                                <td class="px-4 py-3">
+                                    <span
+                                        class="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
+                                        :class="m.isActive ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'"
+                                    >
+                                        {{ m.isActive ? 'Active' : 'Inactive' }}
+                                    </span>
+                                </td>
+                                <td class="px-4 py-3 text-right">
+                                    <button
+                                        v-if="m._id !== authStore.user?.id"
+                                        @click="handleToggleActive(m)"
+                                        :disabled="toggling.has(m._id)"
+                                        class="text-xs font-medium disabled:opacity-40 transition-colors"
+                                        :class="m.isActive ? 'text-red-500 hover:text-red-700' : 'text-green-600 hover:text-green-700'"
+                                    >
+                                        {{ toggling.has(m._id) ? '...' : (m.isActive ? 'Deactivate' : 'Reactivate') }}
+                                    </button>
                                 </td>
                             </tr>
                         </tbody>
