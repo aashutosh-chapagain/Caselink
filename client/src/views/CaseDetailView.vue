@@ -33,6 +33,7 @@ const editDescription = ref('');
 const editAddress = ref('');
 const editLat = ref(0);
 const editLng = ref(0);
+const editDueAt = ref('');
 const editSaving = ref(false);
 const editError = ref('');
 
@@ -43,6 +44,7 @@ function startEdit() {
     editAddress.value = caseData.value.address ?? '';
     editLat.value = caseData.value.lat ?? 0;
     editLng.value = caseData.value.lng ?? 0;
+    editDueAt.value = caseData.value.dueAt ? caseData.value.dueAt.split('T')[0] : '';
     editError.value = '';
     editing.value = true;
 }
@@ -70,6 +72,7 @@ async function saveEdit() {
             description: editDescription.value.trim(),
             address: editAddress.value,
             ...(editAddress.value && { lat: editLat.value, lng: editLng.value }),
+            dueAt: editDueAt.value || null,
         });
         caseData.value = res.data;
         editing.value = false;
@@ -129,6 +132,14 @@ function formatDate(iso: string) {
     return new Date(iso).toLocaleDateString('en-AU', {
         day: 'numeric', month: 'short', year: 'numeric',
     });
+}
+
+function dueBadgeClass(dueAt: string): string {
+    const diffDays = Math.ceil((new Date(dueAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+    if (diffDays < 0) return 'text-red-600 font-semibold';
+    if (diffDays === 0) return 'text-orange-600 font-medium';
+    if (diffDays <= 3) return 'text-yellow-600';
+    return 'text-slate-700';
 }
 
 function formatDateTime(iso: string) {
@@ -297,6 +308,16 @@ onUnmounted(() => {
                             </div>
                             <div>
                                 <label class="block text-xs font-medium text-slate-500 mb-1">
+                                    Due Date <span class="text-slate-400 font-normal">(optional)</span>
+                                </label>
+                                <input
+                                    v-model="editDueAt"
+                                    type="date"
+                                    class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                />
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-slate-500 mb-1">
                                     Address <span class="text-slate-400 font-normal">(optional)</span>
                                 </label>
                                 <LocationPicker
@@ -361,6 +382,14 @@ onUnmounted(() => {
                         <div>
                             <span class="text-slate-400">Created</span>
                             <p class="text-slate-700 font-medium">{{ formatDate(caseData.createdAt) }}</p>
+                        </div>
+                        <div>
+                            <span class="text-slate-400">Due Date</span>
+                            <p v-if="caseData.dueAt" class="font-medium mt-0.5" :class="dueBadgeClass(caseData.dueAt)">
+                                {{ formatDate(caseData.dueAt) }}
+                                <span v-if="new Date(caseData.dueAt) < new Date()" class="ml-1 text-xs">(Overdue)</span>
+                            </p>
+                            <p v-else class="text-slate-400 text-sm">—</p>
                         </div>
                         <div v-if="caseData.address" class="col-span-2">
                             <span class="text-slate-400">Address</span>

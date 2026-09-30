@@ -14,7 +14,7 @@ const casesStore = useCasesStore();
 const showModal = ref(false);
 const submitting = ref(false);
 const modalError = ref('');
-const form = ref({ title: '', description: '', region: '', priority: 'medium' as CasePriority, type: '' as CaseType | '', address: '', lat: 0, lng: 0 });
+const form = ref({ title: '', description: '', region: '', priority: 'medium' as CasePriority, type: '' as CaseType | '', address: '', lat: 0, lng: 0, dueAt: '' });
 
 const priorityOptions: { label: string; value: CasePriority }[] = [
     { label: 'Critical', value: 'critical' },
@@ -34,7 +34,7 @@ const caseTypeOptions: { label: string; value: CaseType }[] = [
 ];
 
 function openModal() {
-    form.value = { title: '', description: '', region: '', priority: 'medium', type: '', address: '', lat: 0, lng: 0 };
+    form.value = { title: '', description: '', region: '', priority: 'medium', type: '', address: '', lat: 0, lng: 0, dueAt: '' };
     modalError.value = '';
     showModal.value = true;
 }
@@ -54,10 +54,11 @@ async function submitCase() {
     submitting.value = true;
     modalError.value = '';
     try {
-        const { address, lat, lng, ...rest } = form.value;
+        const { address, lat, lng, dueAt, ...rest } = form.value;
         const payload = {
             ...rest,
             ...(address && { address, lat, lng }),
+            ...(dueAt && { dueAt }),
         };
         await createCase(payload as Parameters<typeof createCase>[0]);
         showModal.value = false;
@@ -72,6 +73,7 @@ const tabs = [
     { label: 'All', value: undefined },
     { label: 'Open', value: 'open' },
     { label: 'In Progress', value: 'in_progress' },
+    { label: 'Overdue', value: 'overdue' },
     { label: 'Closed', value: 'closed' },
     { label: 'Map', value: 'map' },
 ];
@@ -105,10 +107,15 @@ watch(searchQuery, (val) => {
 });
 
 const displayedCases = computed(() => {
+    const now = new Date();
+    const isOverdue = (c: Case) => !!c.dueAt && new Date(c.dueAt) < now;
+
     if (isSearching.value) {
+        if (activeTab.value === 'overdue') return searchResults.value.filter(isOverdue);
         if (!activeTab.value || activeTab.value === 'map') return searchResults.value;
         return searchResults.value.filter(c => c.status === activeTab.value);
     }
+    if (activeTab.value === 'overdue') return casesStore.activeCases.filter(isOverdue);
     if (activeTab.value === 'closed') return casesStore.closedCases;
     if (activeTab.value === 'map' || activeTab.value === undefined) return casesStore.activeCases;
     return casesStore.activeCases.filter(c => c.status === activeTab.value);
@@ -189,6 +196,17 @@ function formatDate(iso: string) {
         month: 'short',
         year: 'numeric',
     });
+}
+
+function dueBadge(dueAt?: string | null): { label: string; cls: string } | null {
+    if (!dueAt) return null;
+    const now = new Date();
+    const due = new Date(dueAt);
+    const diffDays = Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    if (diffDays < 0) return { label: 'Overdue', cls: 'text-red-600' };
+    if (diffDays === 0) return { label: 'Due today', cls: 'text-orange-600' };
+    if (diffDays <= 3) return { label: `Due in ${diffDays}d`, cls: 'text-yellow-600' };
+    return { label: `Due ${formatDate(dueAt)}`, cls: 'text-slate-400' };
 }
 </script>
 
@@ -284,14 +302,14 @@ function formatDate(iso: string) {
                                 <th class="text-left px-4 py-3 font-medium text-slate-600">Type</th>
                                 <th class="text-left px-4 py-3 font-medium text-slate-600">Priority</th>
                                 <th class="text-left px-4 py-3 font-medium text-slate-600">Status</th>
+                                <th class="text-left px-4 py-3 font-medium text-slate-600">Due</th>
                                 <th class="text-left px-4 py-3 font-medium text-slate-600">Region</th>
                                 <th class="text-left px-4 py-3 font-medium text-slate-600">Assigned To</th>
-                                <th class="text-left px-4 py-3 font-medium text-slate-600">Created</th>
                             </tr>
                         </thead>
                         <tbody>
                             <tr v-if="displayedCases.length === 0">
-                                <td colspan="7" class="px-4 py-8 text-center text-slate-400">
+                                <td colspan="6" class="px-4 py-8 text-center text-slate-400">
                                     {{ isSearching ? `No cases found matching "${searchQuery}".` : 'No cases found.' }}
                                 </td>
                             </tr>
@@ -301,7 +319,14 @@ function formatDate(iso: string) {
                                 class="border-b border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer"
                                 @click="$router.push(`/cases/${c._id}`)"
                             >
-                                <td class="px-4 py-3 font-medium text-slate-800">{{ c.title }}</td>
+                                <td class="px-4 py-3">
+                                    <span class="font-medium text-slate-800">{{ c.title }}</span>
+                                    <span
+                                        v-if="dueBadge(c.dueAt)"
+                                        class="block text-xs font-medium mt-0.5"
+                                        :class="dueBadge(c.dueAt)!.cls"
+                                    >{{ dueBadge(c.dueAt)!.label }}</span>
+                                </td>
                                 <td class="px-4 py-3 text-slate-600 text-xs">{{ typeLabel[c.type] ?? c.type }}</td>
                                 <td class="px-4 py-3">
                                     <span
@@ -319,9 +344,11 @@ function formatDate(iso: string) {
                                         {{ statusLabel[c.status] }}
                                     </span>
                                 </td>
+                                <td class="px-4 py-3 text-xs text-slate-500">
+                                    {{ c.dueAt ? formatDate(c.dueAt) : '—' }}
+                                </td>
                                 <td class="px-4 py-3 text-slate-600">{{ c.region }}</td>
                                 <td class="px-4 py-3 text-slate-600">{{ c.assignedTo?.name ?? '—' }}</td>
-                                <td class="px-4 py-3 text-slate-500">{{ formatDate(c.createdAt) }}</td>
                             </tr>
                         </tbody>
                     </table>
@@ -403,6 +430,16 @@ function formatDate(iso: string) {
                         required
                         class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
                         placeholder="e.g. Perth Metro"
+                    />
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-600 mb-1">
+                        Due Date <span class="text-slate-400 font-normal">(optional)</span>
+                    </label>
+                    <input
+                        v-model="form.dueAt"
+                        type="date"
+                        class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-700"
                     />
                 </div>
                 <div>

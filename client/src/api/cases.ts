@@ -23,6 +23,7 @@ export interface Case {
     assignedTo: CaseUser | null;
     createdBy: CaseUser | null;
     workspaceId: string;
+    dueAt?: string | null;
     createdAt: string;
     updatedAt: string;
 }
@@ -36,6 +37,7 @@ export interface CreateCasePayload {
     address?: string;
     lat?: number;
     lng?: number;
+    dueAt?: string | null;
 }
 
 export interface CasesResponse {
@@ -55,7 +57,7 @@ export function getCase(id: string) {
     return client.get<Case>(`/cases/${id}`);
 }
 
-export function updateCase(id: string, patch: { status?: Case['status']; assignedTo?: string; title?: string; description?: string; address?: string; lat?: number; lng?: number }) {
+export function updateCase(id: string, patch: { status?: Case['status']; assignedTo?: string; title?: string; description?: string; address?: string; lat?: number; lng?: number; dueAt?: string | null }) {
     return client.patch<Case>(`/cases/${id}`, patch);
 }
 

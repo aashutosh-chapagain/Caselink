@@ -86,7 +86,7 @@ router.get('/', async (req: AuthedRequest, res) => {
 
 // POST /api/v1/cases - create a case
 router.post('/', async (req: AuthedRequest, res) => {
-    const { title, description, region, priority, type, address, lat, lng } = req.body;
+    const { title, description, region, priority, type, address, lat, lng, dueAt } = req.body;
 
     if (!title || !description || !region || !type) {
         return res.status(400).json({ error: 'Missing required fields' });
@@ -102,6 +102,10 @@ router.post('/', async (req: AuthedRequest, res) => {
         return res.status(400).json({ error: 'Invalid priority' });
     }
 
+    if (dueAt !== undefined && dueAt !== null && isNaN(new Date(dueAt).getTime())) {
+        return res.status(400).json({ error: 'Invalid due date' });
+    }
+
     const newCase = await CaseModel.create({
         title,
         description,
@@ -112,6 +116,7 @@ router.post('/', async (req: AuthedRequest, res) => {
         ...(address && { address }),
         ...(lat !== undefined && { lat }),
         ...(lng !== undefined && { lng }),
+        ...(dueAt && { dueAt: new Date(dueAt) }),
         createdBy: req.userId,
         assignedTo: req.userId,
         workspaceId: req.workspaceId,
@@ -144,7 +149,7 @@ router.get('/:id', async (req: AuthedRequest, res) => {
 
 // PATCH /api/v1/cases/:id - update status, assignee, title, or description
 router.patch('/:id', async (req: AuthedRequest, res) => {
-    const { status, assignedTo, title, description, address, lat, lng } = req.body;
+    const { status, assignedTo, title, description, address, lat, lng, dueAt } = req.body;
 
     if (assignedTo !== undefined && req.role !== 'admin') {
         return res.status(403).json({ error: 'Only admins can reassign cases' });
@@ -157,6 +162,10 @@ router.patch('/:id', async (req: AuthedRequest, res) => {
 
     if (title !== undefined && !title.trim()) {
         return res.status(400).json({ error: 'Title cannot be empty' });
+    }
+
+    if (dueAt !== undefined && dueAt !== null && isNaN(new Date(dueAt).getTime())) {
+        return res.status(400).json({ error: 'Invalid due date' });
     }
 
     const existing = await CaseModel.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
@@ -200,6 +209,26 @@ router.patch('/:id', async (req: AuthedRequest, res) => {
         existing.address = newAddress;
         existing.lat = address ? lat : undefined;
         existing.lng = address ? lng : undefined;
+    }
+
+    if (dueAt !== undefined) {
+        const newDueAt = dueAt ? new Date(dueAt) : null;
+        const oldTime = existing.dueAt ? (existing.dueAt as unknown as Date).getTime() : null;
+        const newTime = newDueAt ? newDueAt.getTime() : null;
+        if (oldTime !== newTime) {
+            activityLogs.push(
+                Activity.create({
+                    caseId: existing._id,
+                    authorId: req.userId,
+                    note: newDueAt
+                        ? `Due date set to ${newDueAt.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}`
+                        : 'Due date removed',
+                    type: 'update',
+                    workspaceId: req.workspaceId,
+                })
+            );
+            (existing as any).dueAt = newDueAt;
+        }
     }
 
     if (status !== undefined && status !== existing.status) {

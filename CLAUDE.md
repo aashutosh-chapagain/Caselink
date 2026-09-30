@@ -23,12 +23,13 @@ Caselink is a case management platform for emergency services / social work team
 | Team management | Done | Member list, invite modal, pending invites, revoke |
 | Profile page | Done | View account details, edit name, change password |
 | Case CRUD | Done | Create, read, update; soft-closed via status |
-| Case list — filter tabs | Done | All / Open / In Progress / Closed (paginated) |
+| Case list — filter tabs | Done | All / Open / In Progress / Overdue / Closed (paginated) |
 | Case search | Done | Keyword search across title, description, region, address; composes with tab filters |
 | Case list — map tab | Done | Active cases with coords, priority-coloured pins |
 | Case detail | Done | Header, status buttons, edit mode, activity timeline |
 | Case activity timeline | Done | Notes, status changes, reassignments, field edits |
-| Case auto-activity logging | Done | Title and address changes create audit entries |
+| Case auto-activity logging | Done | Title, address, and due date changes create audit entries |
+| Case due dates | Done | Optional `dueAt` field; colour-coded badge in list; Overdue tab; overdue count on dashboard |
 | Case priority ordering | Done | Critical → High → Medium → Low, then by updatedAt |
 | Case reassignment | Done | Admin only; activity logged |
 | Alerts — admin management | Done | Create, toggle active/inactive, Socket.IO live |
@@ -334,6 +335,26 @@ The profile page uses the `PasswordInput` component for both password fields. Na
 - **`type`** — `fire | medical | welfare_check | missing_person | hazmat | rescue | other` (required).
 - **`address`** — optional free-text string from Nominatim. Only stored when user picks from LocationPicker.
 - **`lat` / `lng`** — optional coordinates, always present if `address` is present.
+- **`dueAt`** — optional `Date`, default `null`. Set via date input on create or edit. Cleared by sending `dueAt: null` on PATCH.
+
+### Case due dates
+
+**Model**: `dueAt: { type: Date, default: null }` on the Case schema.
+
+**Routes**:
+- `POST /cases` — accepts `dueAt` ISO string; validated with `isNaN(new Date(dueAt).getTime())`.
+- `PATCH /cases/:id` — accepts `dueAt` ISO string or `null` (to clear); logs activity when changed.
+
+**Activity logging**: due date changes log `"Due date set to DD MMM YYYY"` or `"Due date removed"` (type: `update`). The comparison uses `.getTime()` to avoid string/Date mismatch.
+
+**Dashboard**: `overdueCount` added to `/dashboard/stats` — active cases (`open | in_progress`) where `dueAt < now`. Shown as a stat card that turns red when > 0.
+
+**CaseListView**:
+- **Overdue tab** — client-side filter on `activeCases` where `dueAt < now`. No extra server request.
+- **Due badge** — shown below the case title in the list. Colour logic: overdue=red, due today=orange, due ≤3d=yellow, future=slate. Badge is a pure function `dueBadge(dueAt)` called per row.
+- **Due column** — replaces the old Created column in the table header.
+
+**CaseDetailView**: due date shown in the metadata grid with colour coding; editable via `<input type="date">` in edit mode. Clearing the field sends `dueAt: null` to the server.
 
 ### Case activity auto-logging
 
@@ -342,6 +363,7 @@ The PATCH `/cases/:id` handler creates Activity entries automatically for:
 - **Reassignment** — `"Case reassigned"` (type: `assignment`)
 - **Title change** — `"Title changed from "X" to "Y""` (type: `update`)
 - **Address change** — `"Address updated to "..."` or `"Address removed"` (type: `update`)
+- **Due date change** — `"Due date set to DD MMM YYYY"` or `"Due date removed"` (type: `update`)
 - **Description change** — saved silently, no activity log (too noisy)
 
 Activity `type` enum: `note | status_change | assignment | update`. Client `Activity` interface in `cases.ts` must stay in sync with this.
@@ -418,6 +440,7 @@ Client behaviour in `CaseListView`:
 ### CaseListView behaviour
 
 - All/Open/In Progress tabs filter `activeCases` client-side (no extra requests)
+- Overdue tab: client-side filter on `activeCases` where `dueAt < now` — no server request
 - Closed tab: paginated, triggers fetch on first visit, "Load more" appends
 - Map tab: `CasesMap` over `mappableCases` (active cases with coordinates)
 - Socket.IO `case:created` / `case:updated` keep all tabs live
@@ -429,6 +452,7 @@ Client behaviour in `CaseListView`:
 - Per-assignee workload (open/inProgress split)
 - Closed-this-month count
 - Unassigned active cases (admin only)
+- Overdue cases: active cases where `dueAt < now`
 - Stale cases: no activity in 7+ days (up to 5)
 - 7-day creation trend (missing days filled with 0 server-side)
 
@@ -484,6 +508,9 @@ The REST API is intentionally structured for reuse by a future React Native clie
 - **`notification:new` emits to `user:<id>` not `workspace:<id>`** — notifications are personal. Broadcasting to the workspace room would send every user's notifications to all other members.
 - **Login checks `isActive` after password verification, not before** — checking before would let an attacker learn that an account exists (and is deactivated) without knowing the password. Always verify credentials first, then reveal account state.
 - **`process.env.JWT_SECRET` is not loaded in tests** — `dotenv.config()` only runs in `index.ts`, which tests never import. `setup.ts` sets `process.env.JWT_SECRET = 'test-secret'` directly. Any new env variable used in routes must be set in `setup.ts` if tests call those routes.
+- **Due date comparison uses `.getTime()`, not string comparison** — `existing.dueAt` is a Mongoose `Date` object; comparing it to a string would always be unequal. Always convert both sides to epoch ms before comparing.
+- **Clearing `dueAt` requires sending `dueAt: null` explicitly** — omitting the field from the PATCH body leaves the existing value unchanged (the `if (dueAt !== undefined)` guard). Client must send `dueAt: null` to remove the due date.
+- **`overdueCount` in dashboard uses `$ne: null`** — `{ $lt: now }` alone would match documents where `dueAt` is an old Date; the `$ne: null` guard is belt-and-suspenders to exclude documents where the field is explicitly null vs. missing.
 
 ---
 

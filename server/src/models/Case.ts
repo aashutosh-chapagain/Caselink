@@ -17,6 +17,7 @@ const caseSchema = new Schema({
     assignedTo: { type: Schema.Types.ObjectId, ref: 'User' },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     workspaceId: { type: Schema.Types.ObjectId, ref: 'Workspace', required: true },
+    dueAt: { type: Date, default: null },
 }, { timestamps: true });
 
 caseSchema.index({ title: 'text', description: 'text' });

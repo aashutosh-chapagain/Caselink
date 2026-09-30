@@ -205,10 +205,11 @@ function formatDateTime(iso: string) {
                 </div>
 
                 <!-- Summary cards -->
-                <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
                     <StatCard label="Open" :value="stats.open" color="blue" />
                     <StatCard label="In Progress" :value="stats.inProgress" color="amber" />
                     <StatCard label="Critical Open" :value="stats.criticalOpen" color="red" sublabel="Needs immediate attention" />
+                    <StatCard label="Overdue" :value="stats.overdueCount" :color="stats.overdueCount > 0 ? 'red' : 'slate'" sublabel="Past due date" />
                     <StatCard label="Closed This Month" :value="stats.closedThisMonth" color="green" />
                 </div>
 

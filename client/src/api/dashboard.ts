@@ -20,6 +20,7 @@ export interface DashboardStats {
     criticalOpen: number;
     closedThisMonth: number;
     unassigned: number;
+    overdueCount: number;
     byPriority: {
         critical: number;
         high: number;

@@ -21,7 +21,9 @@ router.get('/stats', async (req: AuthedRequest, res) => {
 
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-    const [statusCounts, priorityCounts, typeCounts, assigneeCounts, closedThisMonth, unassigned, recentActivityCaseIds, trendRaw] =
+    const now = new Date();
+
+    const [statusCounts, priorityCounts, typeCounts, assigneeCounts, closedThisMonth, unassigned, recentActivityCaseIds, trendRaw, overdueCount] =
         await Promise.all([
             // Count by status (all non-closed)
             CaseModel.aggregate([
@@ -78,6 +80,13 @@ router.get('/stats', async (req: AuthedRequest, res) => {
                 { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, count: { $sum: 1 } } },
                 { $sort: { _id: 1 } },
             ]),
+
+            // Count active cases that are past their due date
+            CaseModel.countDocuments({
+                ...baseMatch,
+                status: { $in: ['open', 'in_progress'] },
+                dueAt: { $lt: now, $ne: null },
+            }),
         ]);
 
     // Stale cases: active, created 7+ days ago, no activity in last 7 days
@@ -113,6 +122,7 @@ router.get('/stats', async (req: AuthedRequest, res) => {
         criticalOpen: byPriority['critical'] ?? 0,
         closedThisMonth,
         unassigned,
+        overdueCount,
         byPriority: {
             critical: byPriority['critical'] ?? 0,
             high: byPriority['high'] ?? 0,
