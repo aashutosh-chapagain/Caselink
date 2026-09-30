@@ -141,7 +141,7 @@ npm install      # Installs husky and wires up the pre-push hook
 ### Server (`cd server`)
 ```bash
 npm run dev      # Start with tsx watch (hot-reload)
-npm run seed     # Wipe DB and insert demo workspace + users + cases
+npm run seed     # Wipe DB and insert demo workspace, 4 caseworkers, 26 cases, 41 activities, 4 alerts
 npm test         # Run all tests (vitest, in-memory MongoDB, no .env needed)
 ```
 
@@ -242,6 +242,9 @@ client/src/
     alerts.ts         # fetches once (loaded flag); activeAlerts / urgentAlerts getters; connectSocket() idempotent; reset() on logout
   router/index.ts     # guestOnlyRoutes = ['login', 'register', 'accept-invite'] redirected to /dashboard if authenticated;
                       # requiresAuth and requiresAdmin meta guards
+  utils/
+    caseStyles.ts         # Shared style/label maps: priorityStyles, priorityLabel, statusStyles, statusLabel, typeLabel; dueBadge(), dueBadgeClass()
+    format.ts             # formatDate(), formatDateTime() — en-AU locale, always includes year
   views/
     LoginView.vue         # Login form + "Create a workspace" link to /register
     RegisterView.vue      # New workspace + admin account creation
@@ -251,7 +254,7 @@ client/src/
     CaseListView.vue      # Filter tabs (All/Open/In Progress/Overdue/Closed/Map) + Socket.IO; New Case navigates to /cases/new
     CaseCreateView.vue    # Dedicated create page (/cases/new) — two-card layout; on success redirects to /cases/:id
     CaseDetailView.vue    # Case header, status buttons, activity timeline, edit mode, add note form
-    DashboardView.vue     # Stat cards, charts, stale cases, workload, activity feed, active alerts + map
+    DashboardView.vue     # Stat cards, charts; delegates sections to DashboardAlerts/StaleCasesTable/WorkloadTable/ActivityFeed
     AlertsManageView.vue  # Admin-only alert management: create/toggle alerts, active alerts map
     PublicAlertsView.vue  # Public page (no auth) — polls every 30s; reads workspaceId from ?workspace=
   components/
@@ -262,6 +265,10 @@ client/src/
     CasesMap.vue          # Thin wrapper over PinMap — maps Case[] → MapPin[] with priority colours; hover shows popup
     CaseMap.vue           # Single-pin Leaflet map for CaseDetailView
     StatCard.vue          # Summary stat card (label + number + colour)
+    DashboardAlerts.vue   # Active alerts list + map section; reads alertsStore directly; renders nothing when no active alerts
+    StaleCasesTable.vue   # Stale cases table; props: cases: StaleCase[]; navigates to case detail on row click
+    WorkloadTable.vue     # Caseworker workload table; props: workload: WorkloadRow[]
+    ActivityFeed.vue      # Recent activity feed; props: activity: DashboardActivity[]; navigates to case on click
     BreakdownBar.vue      # Labelled CSS progress bar (exists, not currently used)
 ```
 
@@ -554,8 +561,13 @@ The REST API is intentionally structured for reuse by a future React Native clie
 
 After running `npm run seed` in `server/`:
 
-| Role        | Email                       | Password    |
-|-------------|-----------------------------|-------------|
-| admin       | admin@caselink.test         | password123 |
-| caseworker  | caseworker@caselink.test    | password123 |
-| Workspace   | DFES Perth Metro            | —           |
+| Role        | Email                       | Password    | Name           |
+|-------------|-----------------------------|-------------|----------------|
+| admin       | admin@caselink.test         | password123 | Ash Reynolds   |
+| caseworker  | sarah@caselink.test         | password123 | Sarah Chen     |
+| caseworker  | marcus@caselink.test        | password123 | Marcus Webb    |
+| caseworker  | priya@caselink.test         | password123 | Priya Nair     |
+| caseworker  | tom@caselink.test           | password123 | Tom Gallagher  |
+| Workspace   | DFES Perth Metro            | —           | —              |
+
+Seed data: 26 cases across Perth suburbs (Subiaco, Kwinana, Kings Park, Scarborough, Canning Vale, Joondalup, Mandurah, Armadale, Balga, Yanchep, Rockingham, Cottesloe, Fremantle, and more), all types/priorities/statuses, realistic descriptions. 41 activity entries giving active cases a history of notes and status changes. 4 active alerts including two geo-pinned. Cases span the last 30 days so the dashboard trend chart shows activity.
