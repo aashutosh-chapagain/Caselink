@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { getPublicAlerts, type Alert } from '../api/alerts';
+import { formatDateTime } from '../utils/format';
 
 const route = useRoute();
 const workspaceId = route.query.workspace as string | undefined;
@@ -61,12 +62,6 @@ const severityLabel: Record<string, string> = {
     info: 'Info',
 };
 
-function formatDateTime(iso: string) {
-    return new Date(iso).toLocaleString('en-AU', {
-        day: 'numeric', month: 'short', year: 'numeric',
-        hour: '2-digit', minute: '2-digit',
-    });
-}
 </script>
 
 <template>

@@ -5,6 +5,8 @@ import { useCasesStore } from '../stores/cases';
 import { getCases, exportCases, bulkUpdateCases, type Case } from '../api/cases';
 import { getSocket } from '../api/socket';
 import CasesMap from '../components/CasesMap.vue';
+import { priorityStyles, priorityLabel, statusStyles, statusLabel, typeLabel, dueBadge } from '../utils/caseStyles';
+import { formatDate } from '../utils/format';
 
 const router = useRouter();
 
@@ -134,50 +136,6 @@ onUnmounted(() => {
     socket.off('case:updated', onCaseUpdated);
 });
 
-const statusStyles: Record<string, string> = {
-    open: 'bg-blue-100 text-blue-700',
-    in_progress: 'bg-amber-100 text-amber-700',
-    closed: 'bg-gray-100 text-gray-600',
-};
-
-const statusLabel: Record<string, string> = {
-    open: 'Open',
-    in_progress: 'In Progress',
-    closed: 'Closed',
-};
-
-const priorityStyles: Record<string, string> = {
-    critical: 'bg-red-100 text-red-700',
-    high: 'bg-orange-100 text-orange-700',
-    medium: 'bg-yellow-100 text-yellow-700',
-    low: 'bg-green-100 text-green-700',
-};
-
-const priorityLabel: Record<string, string> = {
-    critical: 'Critical',
-    high: 'High',
-    medium: 'Medium',
-    low: 'Low',
-};
-
-const typeLabel: Record<string, string> = {
-    fire: 'Fire',
-    medical: 'Medical',
-    welfare_check: 'Welfare Check',
-    missing_person: 'Missing Person',
-    hazmat: 'Hazmat',
-    rescue: 'Rescue',
-    other: 'Other',
-};
-
-function formatDate(iso: string) {
-    return new Date(iso).toLocaleDateString('en-AU', {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric',
-    });
-}
-
 async function downloadCsv() {
     exporting.value = true;
     try {
@@ -203,16 +161,6 @@ async function downloadCsv() {
     }
 }
 
-function dueBadge(dueAt?: string | null): { label: string; cls: string } | null {
-    if (!dueAt) return null;
-    const now = new Date();
-    const due = new Date(dueAt);
-    const diffDays = Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-    if (diffDays < 0) return { label: 'Overdue', cls: 'text-red-600' };
-    if (diffDays === 0) return { label: 'Due today', cls: 'text-orange-600' };
-    if (diffDays <= 3) return { label: `Due in ${diffDays}d`, cls: 'text-yellow-600' };
-    return { label: `Due ${formatDate(dueAt)}`, cls: 'text-slate-400' };
-}
 </script>
 
 <template>

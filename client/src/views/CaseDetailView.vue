@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { getCase, updateCase, getActivities, addActivity, type Case, type Activity, type CasePriority } from '../api/cases';
+import { getCase, updateCase, getActivities, addActivity, type Case, type Activity } from '../api/cases';
 import { getUsers, type WorkspaceUser } from '../api/users';
 import { useAuthStore } from '../stores/auth';
 import { getSocket } from '../api/socket';
 import CaseMap from '../components/CaseMap.vue';
 import LocationPicker from '../components/LocationPicker.vue';
+import { priorityStyles, priorityLabel, statusStyles, statusLabel, typeLabel, dueBadgeClass } from '../utils/caseStyles';
+import { formatDate, formatDateTime } from '../utils/format';
 
 const route = useRoute();
 const router = useRouter();
@@ -85,69 +87,12 @@ async function saveEdit() {
 
 const statusOptions: Case['status'][] = ['open', 'in_progress', 'closed'];
 
-const statusStyles: Record<string, string> = {
-    open: 'bg-blue-100 text-blue-700',
-    in_progress: 'bg-amber-100 text-amber-700',
-    closed: 'bg-gray-100 text-gray-600',
-};
-
-const statusLabel: Record<string, string> = {
-    open: 'Open',
-    in_progress: 'In Progress',
-    closed: 'Closed',
-};
-
 const activityTypeStyles: Record<string, string> = {
     note: 'bg-slate-100 text-slate-600',
     status_change: 'bg-blue-50 text-blue-600',
     assignment: 'bg-purple-50 text-purple-600',
     update: 'bg-amber-50 text-amber-600',
 };
-
-const priorityStyles: Record<CasePriority, string> = {
-    critical: 'bg-red-100 text-red-700',
-    high: 'bg-orange-100 text-orange-700',
-    medium: 'bg-yellow-100 text-yellow-700',
-    low: 'bg-green-100 text-green-700',
-};
-
-const priorityLabel: Record<CasePriority, string> = {
-    critical: 'Critical',
-    high: 'High',
-    medium: 'Medium',
-    low: 'Low',
-};
-
-const typeLabel: Record<string, string> = {
-    fire: 'Fire',
-    medical: 'Medical',
-    welfare_check: 'Welfare Check',
-    missing_person: 'Missing Person',
-    hazmat: 'Hazmat',
-    rescue: 'Rescue',
-    other: 'Other',
-};
-
-function formatDate(iso: string) {
-    return new Date(iso).toLocaleDateString('en-AU', {
-        day: 'numeric', month: 'short', year: 'numeric',
-    });
-}
-
-function dueBadgeClass(dueAt: string): string {
-    const diffDays = Math.ceil((new Date(dueAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-    if (diffDays < 0) return 'text-red-600 font-semibold';
-    if (diffDays === 0) return 'text-orange-600 font-medium';
-    if (diffDays <= 3) return 'text-yellow-600';
-    return 'text-slate-700';
-}
-
-function formatDateTime(iso: string) {
-    return new Date(iso).toLocaleString('en-AU', {
-        day: 'numeric', month: 'short', year: 'numeric',
-        hour: '2-digit', minute: '2-digit',
-    });
-}
 
 async function changeStatus(status: Case['status']) {
     if (!caseData.value || caseData.value.status === status) return;

@@ -8,6 +8,8 @@ import StatCard from '../components/StatCard.vue';
 import AlertsMap from '../components/AlertsMap.vue';
 import VueApexCharts from 'vue3-apexcharts';
 import type { ApexOptions } from 'apexcharts';
+import { typeLabel } from '../utils/caseStyles';
+import { formatDateTime } from '../utils/format';
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -32,16 +34,6 @@ onMounted(async () => {
         loading.value = false;
     }
 });
-
-const typeLabel: Record<string, string> = {
-    fire: 'Fire',
-    medical: 'Medical',
-    welfare_check: 'Welfare Check',
-    missing_person: 'Missing Person',
-    hazmat: 'Hazmat',
-    rescue: 'Rescue',
-    other: 'Other',
-};
 
 // Donut chart — priority breakdown
 const prioritySeries = computed(() => [
@@ -116,12 +108,6 @@ const activityTypeStyles: Record<string, string> = {
     assignment: 'bg-purple-50 text-purple-600',
 };
 
-function formatDateTime(iso: string) {
-    return new Date(iso).toLocaleString('en-AU', {
-        day: 'numeric', month: 'short',
-        hour: '2-digit', minute: '2-digit',
-    });
-}
 </script>
 
 <template>
