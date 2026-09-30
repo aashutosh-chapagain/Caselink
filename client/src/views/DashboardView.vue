@@ -1,19 +1,17 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
 import { getDashboardStats, getDashboardActivity, type DashboardStats, type DashboardActivity } from '../api/dashboard';
 import { useAuthStore } from '../stores/auth';
-import { useAlertsStore } from '../stores/alerts';
 import StatCard from '../components/StatCard.vue';
-import AlertsMap from '../components/AlertsMap.vue';
+import DashboardAlerts from '../components/DashboardAlerts.vue';
+import StaleCasesTable from '../components/StaleCasesTable.vue';
+import WorkloadTable from '../components/WorkloadTable.vue';
+import ActivityFeed from '../components/ActivityFeed.vue';
 import VueApexCharts from 'vue3-apexcharts';
 import type { ApexOptions } from 'apexcharts';
 import { typeLabel } from '../utils/caseStyles';
-import { formatDateTime } from '../utils/format';
 
-const router = useRouter();
 const authStore = useAuthStore();
-const alertsStore = useAlertsStore();
 
 const stats = ref<DashboardStats | null>(null);
 const activity = ref<DashboardActivity[]>([]);
@@ -96,17 +94,6 @@ const typeChartOptions = computed((): ApexOptions => ({
     tooltip: { y: { formatter: (v: number) => `${v} case${v !== 1 ? 's' : ''}` } },
 }));
 
-const activityTypeLabel: Record<string, string> = {
-    note: 'Note',
-    status_change: 'Status',
-    assignment: 'Assignment',
-};
-
-const activityTypeStyles: Record<string, string> = {
-    note: 'bg-slate-100 text-slate-600',
-    status_change: 'bg-blue-50 text-blue-600',
-    assignment: 'bg-purple-50 text-purple-600',
-};
 
 </script>
 
@@ -124,71 +111,7 @@ const activityTypeStyles: Record<string, string> = {
             <template v-else-if="stats">
 
                 <!-- Active alerts section -->
-                <div v-if="alertsStore.activeAlerts.length > 0" class="mb-6">
-                    <div class="flex items-center justify-between mb-3">
-                        <h2 class="text-sm font-semibold text-slate-700">
-                            Active Alerts
-                            <span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
-                                :class="alertsStore.urgentAlerts.length > 0 ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'"
-                            >
-                                {{ alertsStore.activeAlerts.length }}
-                            </span>
-                        </h2>
-                        <button
-                            v-if="authStore.isAdmin"
-                            @click="router.push('/alerts/manage')"
-                            class="text-xs text-blue-600 hover:underline"
-                        >Manage alerts</button>
-                    </div>
-
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        <!-- Alert list -->
-                        <div class="bg-white rounded-xl border border-slate-200 shadow-sm divide-y divide-slate-100 overflow-hidden">
-                            <div
-                                v-for="a in alertsStore.activeAlerts.slice(0, 5)"
-                                :key="a._id"
-                                class="flex items-start gap-3 px-4 py-3"
-                            >
-                                <span
-                                    class="mt-0.5 inline-block w-2 h-2 rounded-full shrink-0"
-                                    :class="{
-                                        'bg-red-500':    a.severity === 'critical',
-                                        'bg-orange-500': a.severity === 'high',
-                                        'bg-yellow-400': a.severity === 'medium',
-                                        'bg-blue-400':   a.severity === 'info',
-                                    }"
-                                ></span>
-                                <div class="flex-1 min-w-0">
-                                    <p class="text-sm text-slate-700 truncate">{{ a.message }}</p>
-                                    <p v-if="a.region" class="text-xs text-slate-400 mt-0.5">{{ a.region }}</p>
-                                </div>
-                                <span
-                                    class="shrink-0 text-xs px-1.5 py-0.5 rounded-full font-medium"
-                                    :class="{
-                                        'bg-red-100 text-red-700':    a.severity === 'critical',
-                                        'bg-orange-100 text-orange-700': a.severity === 'high',
-                                        'bg-yellow-100 text-yellow-700': a.severity === 'medium',
-                                        'bg-blue-100 text-blue-700':   a.severity === 'info',
-                                    }"
-                                >{{ a.severity }}</span>
-                            </div>
-                            <div v-if="alertsStore.activeAlerts.length > 5" class="px-4 py-2 text-xs text-slate-400 text-center">
-                                +{{ alertsStore.activeAlerts.length - 5 }} more
-                            </div>
-                        </div>
-
-                        <!-- Alerts map (only if any alert has coordinates) -->
-                        <div
-                            v-if="alertsStore.activeAlerts.some(a => a.lat != null)"
-                            class="rounded-xl overflow-hidden border border-slate-200 shadow-sm"
-                        >
-                            <AlertsMap :alerts="alertsStore.activeAlerts" />
-                        </div>
-                        <div v-else class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex items-center justify-center text-sm text-slate-400">
-                            No alerts have been pinned to a location yet.
-                        </div>
-                    </div>
-                </div>
+                <DashboardAlerts />
 
                 <!-- Summary cards -->
                 <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
@@ -250,98 +173,15 @@ const activityTypeStyles: Record<string, string> = {
                 </div>
 
                 <!-- Stale cases -->
-                <div v-if="stats.staleCases.length > 0" class="bg-white rounded-xl border border-amber-200 shadow-sm p-5 mb-6">
-                    <h2 class="text-sm font-semibold text-amber-700 mb-1">Stale Cases</h2>
-                    <p class="text-xs text-slate-400 mb-4">Active cases with no activity in the last 7 days</p>
-                    <table class="w-full text-sm">
-                        <thead>
-                            <tr class="border-b border-slate-100">
-                                <th class="text-left py-2 font-medium text-slate-500">Title</th>
-                                <th class="text-left py-2 font-medium text-slate-500">Priority</th>
-                                <th class="text-left py-2 font-medium text-slate-500">Assigned To</th>
-                                <th class="text-left py-2 font-medium text-slate-500">Created</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr
-                                v-for="c in stats.staleCases"
-                                :key="c._id"
-                                class="border-b border-slate-50 last:border-0 hover:bg-slate-50 cursor-pointer"
-                                @click="router.push(`/cases/${c._id}`)"
-                            >
-                                <td class="py-2 text-slate-700 font-medium">{{ c.title }}</td>
-                                <td class="py-2">
-                                    <span class="text-xs px-2 py-0.5 rounded-full font-medium" :class="{
-                                        'bg-red-100 text-red-700': c.priority === 'critical',
-                                        'bg-orange-100 text-orange-700': c.priority === 'high',
-                                        'bg-yellow-100 text-yellow-700': c.priority === 'medium',
-                                        'bg-green-100 text-green-700': c.priority === 'low',
-                                    }">{{ c.priority }}</span>
-                                </td>
-                                <td class="py-2 text-slate-600">{{ c.assignedTo?.name ?? '—' }}</td>
-                                <td class="py-2 text-slate-400 text-xs">{{ formatDateTime(c.createdAt) }}</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+                <StaleCasesTable v-if="stats.staleCases.length > 0" :cases="stats.staleCases" />
 
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
                     <!-- Workload table (admin only) -->
-                    <div v-if="authStore.isAdmin" class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-                        <h2 class="text-sm font-semibold text-slate-700 mb-4">Caseworker Workload</h2>
-                        <div v-if="stats.workload.length === 0" class="text-sm text-slate-400">No assigned cases.</div>
-                        <table v-else class="w-full text-sm">
-                            <thead>
-                                <tr class="border-b border-slate-100">
-                                    <th class="text-left py-2 font-medium text-slate-500">Caseworker</th>
-                                    <th class="text-right py-2 font-medium text-slate-500">Open</th>
-                                    <th class="text-right py-2 font-medium text-slate-500">In Progress</th>
-                                    <th class="text-right py-2 font-medium text-slate-500">Total</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr
-                                    v-for="row in stats.workload"
-                                    :key="row._id"
-                                    class="border-b border-slate-50 last:border-0"
-                                >
-                                    <td class="py-2 text-slate-700">{{ row.name ?? '—' }}</td>
-                                    <td class="py-2 text-right text-blue-600">{{ row.open }}</td>
-                                    <td class="py-2 text-right text-amber-500">{{ row.inProgress }}</td>
-                                    <td class="py-2 text-right font-medium text-slate-700">{{ row.open + row.inProgress }}</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+                    <WorkloadTable v-if="authStore.isAdmin" :workload="stats.workload" />
 
                     <!-- Recent activity -->
-                    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-                        <h2 class="text-sm font-semibold text-slate-700 mb-4">Recent Activity</h2>
-                        <div v-if="activity.length === 0" class="text-sm text-slate-400">No recent activity.</div>
-                        <ul v-else class="space-y-3">
-                            <li v-for="a in activity" :key="a._id" class="flex gap-3">
-                                <div class="mt-1.5 w-2 h-2 rounded-full bg-slate-300 shrink-0"></div>
-                                <div class="flex-1 min-w-0">
-                                    <div class="flex items-center gap-2 flex-wrap mb-0.5">
-                                        <span class="text-xs font-medium text-slate-700">{{ a.authorId?.name ?? 'System' }}</span>
-                                        <span class="text-xs px-1.5 py-0.5 rounded font-medium" :class="activityTypeStyles[a.type]">
-                                            {{ activityTypeLabel[a.type] }}
-                                        </span>
-                                        <span class="text-xs text-slate-400">{{ formatDateTime(a.createdAt) }}</span>
-                                    </div>
-                                    <button
-                                        v-if="a.caseId"
-                                        @click="router.push(`/cases/${a.caseId._id}`)"
-                                        class="text-xs text-blue-600 hover:underline truncate block max-w-full text-left"
-                                    >
-                                        {{ a.caseId.title }}
-                                    </button>
-                                    <p class="text-xs text-slate-500 mt-0.5">{{ a.note }}</p>
-                                </div>
-                            </li>
-                        </ul>
-                    </div>
+                    <ActivityFeed :activity="activity" />
 
                 </div>
             </template>
