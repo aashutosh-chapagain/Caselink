@@ -239,6 +239,57 @@ function onLinkBlur() {
     setTimeout(() => { linkDropdownOpen.value = false; }, 150);
 }
 
+// --- Case history / SLA ---
+
+function formatDuration(ms: number): string {
+    const minutes = Math.floor(ms / 60000);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    if (days > 0) return `${days}d ${hours % 24}h`;
+    if (hours > 0) return `${hours}h ${minutes % 60}m`;
+    return `${minutes}m`;
+}
+
+const statusHistory = computed(() => {
+    if (!caseData.value) return [];
+
+    const changes = [...activities.value]
+        .filter(a => a.type === 'status_change')
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+    const result: Array<{ status: string; from: Date; to: Date | null; durationMs: number | null }> = [];
+    let currentStatus = 'open';
+    let currentFrom = new Date(caseData.value.createdAt);
+
+    for (const change of changes) {
+        const match = change.note.match(/Status changed from (.+) to (.+)/);
+        if (!match) continue;
+        const changeTime = new Date(change.createdAt);
+        result.push({ status: currentStatus, from: currentFrom, to: changeTime, durationMs: changeTime.getTime() - currentFrom.getTime() });
+        currentStatus = match[2];
+        currentFrom = changeTime;
+    }
+
+    const isFinished = caseData.value.status === 'closed';
+    result.push({
+        status: currentStatus,
+        from: currentFrom,
+        to: isFinished ? new Date(caseData.value.updatedAt) : null,
+        durationMs: isFinished ? new Date(caseData.value.updatedAt).getTime() - currentFrom.getTime() : null,
+    });
+
+    return result;
+});
+
+const slaStatus = computed(() => {
+    if (!caseData.value?.dueAt) return null;
+    const dueAt = new Date(caseData.value.dueAt);
+    if (caseData.value.status === 'closed') {
+        return new Date(caseData.value.updatedAt) <= dueAt ? 'met' : 'missed';
+    }
+    return new Date() <= dueAt ? 'on_track' : 'overdue';
+});
+
 async function removeLink(linkedId: string) {
     const next = new Set(unlinking.value);
     next.add(linkedId);
@@ -548,6 +599,56 @@ async function removeLink(linkedId: string) {
                             No cases found.
                         </div>
                     </div>
+                </div>
+
+                <!-- Case history / SLA -->
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-sm font-semibold text-slate-700">Case History</h2>
+                        <span
+                            v-if="slaStatus"
+                            class="text-xs font-medium px-2 py-0.5 rounded-full"
+                            :class="{
+                                'bg-green-100 text-green-700': slaStatus === 'met' || slaStatus === 'on_track',
+                                'bg-red-100 text-red-700': slaStatus === 'missed' || slaStatus === 'overdue',
+                            }"
+                        >
+                            SLA {{ slaStatus === 'met' ? 'Met' : slaStatus === 'missed' ? 'Missed' : slaStatus === 'on_track' ? 'On Track' : 'Overdue' }}
+                        </span>
+                    </div>
+                    <p v-if="activitiesHasMore" class="text-xs text-slate-400 mb-3">
+                        Showing history based on loaded activities — load older activity for full timeline.
+                    </p>
+                    <ol class="relative border-l border-slate-200 space-y-4 ml-2">
+                        <li
+                            v-for="(seg, i) in statusHistory"
+                            :key="i"
+                            class="pl-5"
+                        >
+                            <div class="absolute w-2.5 h-2.5 rounded-full -left-1.5 mt-0.5"
+                                :class="{
+                                    'bg-blue-400': seg.status === 'open',
+                                    'bg-amber-400': seg.status === 'in_progress',
+                                    'bg-slate-400': seg.status === 'closed',
+                                }"
+                            ></div>
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="text-sm font-medium text-slate-700 capitalize">
+                                    {{ seg.status === 'in_progress' ? 'In Progress' : seg.status === 'open' ? 'Open' : 'Closed' }}
+                                </span>
+                                <span v-if="seg.durationMs !== null" class="text-xs text-slate-400">
+                                    {{ formatDuration(seg.durationMs) }}
+                                </span>
+                                <span v-else class="text-xs text-slate-400 italic">ongoing</span>
+                            </div>
+                            <p class="text-xs text-slate-400 mt-0.5">
+                                {{ seg.from.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) }}
+                                <template v-if="seg.to">
+                                    → {{ seg.to.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) }}
+                                </template>
+                            </p>
+                        </li>
+                    </ol>
                 </div>
 
                 <!-- Activity timeline -->

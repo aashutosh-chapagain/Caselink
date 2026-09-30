@@ -2,7 +2,9 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useCasesStore } from '../stores/cases';
+import { useAuthStore } from '../stores/auth';
 import { getCases, exportCases, bulkUpdateCases, type Case } from '../api/cases';
+import { getUsers, type WorkspaceUser } from '../api/users';
 import { getSocket } from '../api/socket';
 import CasesMap from '../components/CasesMap.vue';
 import { priorityStyles, priorityLabel, statusStyles, statusLabel, typeLabel, dueBadge } from '../utils/caseStyles';
@@ -11,8 +13,14 @@ import { formatDate } from '../utils/format';
 const router = useRouter();
 
 const casesStore = useCasesStore();
+const authStore = useAuthStore();
 
 const exporting = ref(false);
+const users = ref<WorkspaceUser[]>([]);
+
+// Advanced filters
+const filterType = ref('');
+const filterAssignee = ref('');
 const bulkUpdating = ref(false);
 const selectedIds = ref<Set<string>>(new Set());
 
@@ -57,15 +65,25 @@ const displayedCases = computed(() => {
     const now = new Date();
     const isOverdue = (c: Case) => !!c.dueAt && new Date(c.dueAt) < now;
 
+    let base: Case[];
     if (isSearching.value) {
-        if (activeTab.value === 'overdue') return searchResults.value.filter(isOverdue);
-        if (!activeTab.value || activeTab.value === 'map') return searchResults.value;
-        return searchResults.value.filter(c => c.status === activeTab.value);
+        if (activeTab.value === 'overdue') base = searchResults.value.filter(isOverdue);
+        else if (!activeTab.value || activeTab.value === 'map') base = searchResults.value;
+        else base = searchResults.value.filter(c => c.status === activeTab.value);
+    } else if (activeTab.value === 'overdue') {
+        base = casesStore.activeCases.filter(isOverdue);
+    } else if (activeTab.value === 'closed') {
+        base = casesStore.closedCases;
+    } else if (activeTab.value === 'map' || activeTab.value === undefined) {
+        base = casesStore.activeCases;
+    } else {
+        base = casesStore.activeCases.filter(c => c.status === activeTab.value);
     }
-    if (activeTab.value === 'overdue') return casesStore.activeCases.filter(isOverdue);
-    if (activeTab.value === 'closed') return casesStore.closedCases;
-    if (activeTab.value === 'map' || activeTab.value === undefined) return casesStore.activeCases;
-    return casesStore.activeCases.filter(c => c.status === activeTab.value);
+
+    if (filterType.value) base = base.filter(c => c.type === filterType.value);
+    if (filterAssignee.value) base = base.filter(c => c.assignedTo?._id === filterAssignee.value);
+
+    return base;
 });
 
 const isLoading = computed(() => {
@@ -117,7 +135,10 @@ async function bulkUpdateStatus(status: string) {
 
 const mappableCases = computed(() => {
     const source = isSearching.value ? searchResults.value : casesStore.activeCases;
-    return source.filter(c => c.lat != null && c.lng != null);
+    let filtered = source.filter(c => c.lat != null && c.lng != null);
+    if (filterType.value) filtered = filtered.filter(c => c.type === filterType.value);
+    if (filterAssignee.value) filtered = filtered.filter(c => c.assignedTo?._id === filterAssignee.value);
+    return filtered;
 });
 
 const socket = getSocket();
@@ -127,6 +148,9 @@ function onCaseUpdated(updated: Case) { casesStore.updateCase(updated); }
 
 onMounted(() => {
     casesStore.fetchActiveCases();
+    if (authStore.isAdmin) {
+        getUsers().then(res => { users.value = res.data; }).catch(() => {});
+    }
     socket.on('case:created', onCaseCreated);
     socket.on('case:updated', onCaseUpdated);
 });
@@ -205,6 +229,38 @@ async function downloadCsv() {
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                     </svg>
+                </button>
+            </div>
+
+            <!-- Advanced filters -->
+            <div class="flex items-center gap-2 mb-3 flex-wrap">
+                <select
+                    v-model="filterType"
+                    class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                >
+                    <option value="">All Types</option>
+                    <option value="fire">Fire</option>
+                    <option value="medical">Medical</option>
+                    <option value="welfare_check">Welfare Check</option>
+                    <option value="missing_person">Missing Person</option>
+                    <option value="hazmat">Hazmat</option>
+                    <option value="rescue">Rescue</option>
+                    <option value="other">Other</option>
+                </select>
+                <select
+                    v-if="authStore.isAdmin"
+                    v-model="filterAssignee"
+                    class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                >
+                    <option value="">All Caseworkers</option>
+                    <option v-for="u in users" :key="u._id" :value="u._id">{{ u.name }}</option>
+                </select>
+                <button
+                    v-if="filterType || filterAssignee"
+                    @click="filterType = ''; filterAssignee = ''"
+                    class="text-xs text-slate-500 hover:text-slate-700 px-2 py-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                >
+                    Clear filters
                 </button>
             </div>
 

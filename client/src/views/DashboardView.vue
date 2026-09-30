@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { getDashboardStats, getDashboardActivity, type DashboardStats, type DashboardActivity } from '../api/dashboard';
 import { useAuthStore } from '../stores/auth';
 import StatCard from '../components/StatCard.vue';
@@ -17,11 +17,14 @@ const stats = ref<DashboardStats | null>(null);
 const activity = ref<DashboardActivity[]>([]);
 const loading = ref(true);
 const error = ref('');
+const selectedDays = ref(7);
 
-onMounted(async () => {
+async function fetchData() {
+    loading.value = true;
+    error.value = '';
     try {
         const [statsRes, activityRes] = await Promise.all([
-            getDashboardStats(),
+            getDashboardStats(selectedDays.value),
             getDashboardActivity(),
         ]);
         stats.value = statsRes.data;
@@ -31,7 +34,15 @@ onMounted(async () => {
     } finally {
         loading.value = false;
     }
-});
+}
+
+onMounted(fetchData);
+watch(selectedDays, fetchData);
+
+const closedLabel = computed(() =>
+    selectedDays.value === 7 ? 'Closed (7d)' :
+    selectedDays.value === 30 ? 'Closed (30d)' : 'Closed (90d)'
+);
 
 // Donut chart — priority breakdown
 const prioritySeries = computed(() => [
@@ -67,7 +78,8 @@ const trendChartOptions = computed((): ApexOptions => ({
         categories: stats.value?.trend.map(d =>
             new Date(d.date).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })
         ) ?? [],
-        labels: { style: { fontSize: '11px' } },
+        labels: { style: { fontSize: '11px' }, rotate: 0 },
+        tickAmount: selectedDays.value > 14 ? 7 : undefined,
     },
     yaxis: { labels: { style: { fontSize: '11px' } }, min: 0, forceNiceScale: true },
     dataLabels: { enabled: false },
@@ -100,7 +112,18 @@ const typeChartOptions = computed((): ApexOptions => ({
 <template>
     <div class="min-h-screen bg-slate-50">
         <div class="max-w-6xl mx-auto px-6 py-8">
-            <h1 class="text-2xl font-bold text-slate-800 mb-6">Dashboard</h1>
+            <div class="flex items-center justify-between mb-6">
+                <h1 class="text-2xl font-bold text-slate-800">Dashboard</h1>
+                <div class="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
+                    <button
+                        v-for="d in [7, 30, 90]"
+                        :key="d"
+                        @click="selectedDays = d"
+                        class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors"
+                        :class="selectedDays === d ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                    >{{ d }}d</button>
+                </div>
+            </div>
 
             <div v-if="loading" class="text-slate-500 text-sm">Loading...</div>
 
@@ -119,7 +142,7 @@ const typeChartOptions = computed((): ApexOptions => ({
                     <StatCard label="In Progress" :value="stats.inProgress" color="amber" />
                     <StatCard label="Critical Open" :value="stats.criticalOpen" color="red" sublabel="Needs immediate attention" />
                     <StatCard label="Overdue" :value="stats.overdueCount" :color="stats.overdueCount > 0 ? 'red' : 'slate'" sublabel="Past due date" />
-                    <StatCard label="Closed This Month" :value="stats.closedThisMonth" color="green" />
+                    <StatCard :label="closedLabel" :value="stats.closedInPeriod" color="green" />
                 </div>
 
                 <!-- Second row: unassigned + trend -->
@@ -132,7 +155,7 @@ const typeChartOptions = computed((): ApexOptions => ({
                         sublabel="Active cases with no caseworker"
                     />
                     <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5" :class="authStore.isAdmin ? 'lg:col-span-2' : 'lg:col-span-3'">
-                        <h2 class="text-sm font-semibold text-slate-700 mb-2">Cases Created — Last 7 Days</h2>
+                        <h2 class="text-sm font-semibold text-slate-700 mb-2">Cases Created — Last {{ selectedDays }} Days</h2>
                         <VueApexCharts
                             type="area"
                             height="120"

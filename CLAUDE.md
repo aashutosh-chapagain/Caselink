@@ -38,6 +38,9 @@ Caselink is a case management platform for emergency services / social work team
 | Case reassignment | Done | Admin only; activity logged |
 | Case linking | Done | Bidirectional related-case associations; searchable from detail view; activity-logged on both sides |
 | Overdue escalation notifications | Done | Daily 08:00 cron notifies assignee + all admins when dueAt passes; fires once per case; resets if due date changes |
+| Advanced case filtering | Done | Type + assignee dropdowns in CaseListView; compose with search and tab filters; assignee filter admin-only |
+| Dashboard date range | Done | 7d/30d/90d preset selector; controls trend chart period and closed-in-period count |
+| Case history / SLA view | Done | Status timeline with durations in CaseDetailView; SLA badge (Met/Missed/On Track/Overdue) when due date set |
 | Alerts — admin management | Done | Create, toggle active/inactive, Socket.IO live |
 | Alerts — public page | Done | No auth, polls every 30s, workspace scoped |
 | Alerts — in-app banners | Done | Critical + High banners, per-alert dismissable |
@@ -464,6 +467,27 @@ Client behaviour in `CaseListView`:
 - Activities paginated: "Load older activity" button prepends via `before` cursor (oldest visible `_id`)
 - Socket.IO `case:updated` patches header live; `activity:added` appends to timeline
 - Both socket listeners filter by case ID to avoid cross-case pollution
+- Case History card sits between Related Cases and Activity; see below
+
+### Case history / SLA view
+
+Client-only card in `CaseDetailView`. No extra server requests — processes already-loaded activities.
+
+**`statusHistory` computed**: filters activities to `type === 'status_change'`, sorts chronologically, and reconstructs status segments:
+1. Always starts with `open` at `caseData.createdAt`
+2. Each status_change note is parsed with `/Status changed from (.+) to (.+)/`
+3. Each segment records `{ status, from, to, durationMs }`
+4. Final segment: `to = null` (ongoing) if not closed; `to = updatedAt` if closed
+
+**`formatDuration(ms)`**: formats epoch-ms duration as `Xd Yh`, `Xh Ym`, or `Xm`.
+
+**`slaStatus` computed**: `null` if no `dueAt`. Compares `updatedAt` (closed) or `now` (open/in_progress) against `dueAt`:
+- `'met'` — closed on or before due date
+- `'missed'` — closed after due date
+- `'on_track'` — active, due date in the future
+- `'overdue'` — active, past due date
+
+**Incomplete history warning**: if `activitiesHasMore` is true, a note is shown — the earliest status changes may not be loaded.
 
 ### Bulk status update
 
@@ -487,21 +511,48 @@ Client:
 - Map tab: `CasesMap` over `mappableCases` (active cases with coordinates)
 - Socket.IO `case:created` / `case:updated` keep all tabs live
 - Bulk select: checkboxes on every list row; action bar floats at bottom when any selected
+- Advanced filters: type dropdown (all roles) + assignee dropdown (admin only, above tab bar); compose with search and tab filters; `mappableCases` also respects them
+
+### Advanced case filtering
+
+Two filter dropdowns sit above the tab bar in `CaseListView`, between the search input and the tabs.
+
+**Type filter** — all 7 case types; applies to all tabs including map. No server request — pure client-side filter on the computed case list.
+
+**Assignee filter** — admin-only; `getUsers()` is called once on mount and stored in a local `users` ref. Filters by `assignedTo?._id`. Not shown for caseworkers.
+
+Both `filterType` and `filterAssignee` are applied at the end of `displayedCases` and `mappableCases` computed properties, after tab/search filtering, so they compose naturally. A "Clear filters" button appears when any filter is active.
+
+**CSV export does not respect these filters** — the export button passes only the active tab and search query to the server. Type/assignee filtering would require server-side query params on the export route.
 
 ### Dashboard
 
-`GET /api/v1/dashboard/stats` — all aggregated data in one round trip:
+`GET /api/v1/dashboard/stats?days=7|30|90` — all aggregated data in one round trip:
 - Counts by status, priority, type
 - Per-assignee workload (open/inProgress split)
-- Closed-this-month count
+- `closedInPeriod` — cases closed within the selected period
 - Unassigned active cases (admin only)
 - Overdue cases: active cases where `dueAt < now`
-- Stale cases: no activity in 7+ days (up to 5)
-- 7-day creation trend (missing days filled with 0 server-side)
+- Stale cases: no activity in last 7 days, regardless of `days` param (always fixed 7d threshold)
+- Trend: `days` data points, one per day, missing days filled with 0 server-side
 
 `GET /api/v1/dashboard/activity` — last 10 activities, workspace-wide (admin) or own cases (caseworker).
 
 Charts use `computed(): ApexOptions` — the explicit return type is required or TypeScript widens `'donut'` to `string`, failing ApexCharts' type check.
+
+### Dashboard date range
+
+`GET /dashboard/stats` accepts a `days` query param (7, 30, or 90). Any other value defaults to 7. Whitelist-validated with `[7, 30, 90].includes(rawDays)`.
+
+The `days` param affects:
+- `closedInPeriod` count — cases closed within `days` days (replaces the old calendar-month `closedThisMonth`)
+- Trend chart length — fills exactly `days` data points; x-axis `tickAmount: 7` when `days > 14` to avoid label crowding
+
+The `days` param does **not** affect:
+- Stale case detection — always uses a fixed 7-day `sevenDaysAgo` threshold
+- Overdue count — always `dueAt < now` regardless
+
+Client: `DashboardView` has `selectedDays = ref(7)` and a `watch(selectedDays, fetchData)`. `fetchData()` passes `selectedDays.value` to `getDashboardStats()` and re-fetches both stats and activity. A segmented control (7d / 30d / 90d) is in the dashboard header. The `closedLabel` computed returns the appropriate label for the stat card.
 
 ### Alerts
 
@@ -591,6 +642,11 @@ The REST API is intentionally structured for reuse by a future React Native clie
 - **Overdue cron is wired in `index.ts`, not `app.ts`** — tests import `app.ts` directly and never run the cron. Any cron or scheduled job must live in `index.ts` to stay out of the test environment.
 - **`checkOverdueCases` receives the `io` instance as a parameter** — it cannot call `app.get('io')` because it has no access to the Express app. `index.ts` passes `io` directly when scheduling the cron.
 - **Notification type enum includes `'overdue'`** — added alongside `'assignment'`. Client notification UI renders `notification.message` for all types; no client changes are needed when adding new notification types as long as the message is self-explanatory.
+- **`closedThisMonth` renamed to `closedInPeriod`** — both the server response field and the `DashboardStats` interface use `closedInPeriod`. Any code referencing the old name will fail silently (TypeScript will catch it at build time).
+- **Dashboard `days` param is whitelist-validated** — only `[7, 30, 90]` are accepted; any other value (including 14, 60, etc.) silently falls back to 7. Do not add intermediate values without updating the whitelist.
+- **`statusHistory` uses loaded activities only** — if `activitiesHasMore` is true, early status changes are not loaded and the timeline is incomplete. The view shows a warning in that case. To get the full history, load older activities first.
+- **`filterType` / `filterAssignee` are client-side only** — applied in `displayedCases` and `mappableCases` computed properties, after server fetch. The CSV export route does not receive them and exports all matching rows ignoring these filters.
+- **Assignee filter users are fetched only for admins** — `getUsers()` is called on mount in `CaseListView` only when `authStore.isAdmin`. The `users` ref stays empty for caseworkers, and the assignee dropdown is hidden entirely via `v-if="authStore.isAdmin"`.
 
 ---
 

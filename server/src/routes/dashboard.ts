@@ -19,11 +19,14 @@ router.get('/stats', async (req: AuthedRequest, res) => {
 
     const activeMatch = { ...baseMatch, status: { $in: ['open', 'in_progress'] } };
 
+    const rawDays = parseInt(req.query.days as string);
+    const days = [7, 30, 90].includes(rawDays) ? rawDays : 7;
+    const periodStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
     const now = new Date();
 
-    const [statusCounts, priorityCounts, typeCounts, assigneeCounts, closedThisMonth, unassigned, recentActivityCaseIds, trendRaw, overdueCount] =
+    const [statusCounts, priorityCounts, typeCounts, assigneeCounts, closedInPeriod, unassigned, recentActivityCaseIds, trendRaw, overdueCount] =
         await Promise.all([
             // Count by status (all non-closed)
             CaseModel.aggregate([
@@ -55,11 +58,11 @@ router.get('/stats', async (req: AuthedRequest, res) => {
                   ])
                 : Promise.resolve([]),
 
-            // Count cases closed this calendar month
+            // Count cases closed within the selected period
             CaseModel.countDocuments({
                 ...baseMatch,
                 status: 'closed',
-                updatedAt: { $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) },
+                updatedAt: { $gte: periodStart },
             }),
 
             // Count active cases with no assignee (admin only)
@@ -74,9 +77,9 @@ router.get('/stats', async (req: AuthedRequest, res) => {
             // IDs of cases that had activity in the last 7 days (for stale detection)
             Activity.distinct('caseId', { workspaceId, createdAt: { $gte: sevenDaysAgo } }),
 
-            // Cases created per day over last 7 days (for trend chart)
+            // Cases created per day over the selected period (for trend chart)
             CaseModel.aggregate([
-                { $match: { ...baseMatch, createdAt: { $gte: sevenDaysAgo } } },
+                { $match: { ...baseMatch, createdAt: { $gte: periodStart } } },
                 { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, count: { $sum: 1 } } },
                 { $sort: { _id: 1 } },
             ]),
@@ -102,11 +105,11 @@ router.get('/stats', async (req: AuthedRequest, res) => {
         .sort({ createdAt: 1 })
         .limit(5);
 
-    // Fill trend: ensure all 7 days are present, missing days = 0
+    // Fill trend: ensure all `days` days are present, missing days = 0
     const trendMap = Object.fromEntries(trendRaw.map((r: any) => [r._id, r.count]));
-    const trend = Array.from({ length: 7 }, (_, i) => {
+    const trend = Array.from({ length: days }, (_, i) => {
         const d = new Date();
-        d.setDate(d.getDate() - (6 - i));
+        d.setDate(d.getDate() - (days - 1 - i));
         const key = d.toISOString().split('T')[0];
         return { date: key, count: trendMap[key] ?? 0 };
     });
@@ -120,7 +123,7 @@ router.get('/stats', async (req: AuthedRequest, res) => {
         open: byStatus['open'] ?? 0,
         inProgress: byStatus['in_progress'] ?? 0,
         criticalOpen: byPriority['critical'] ?? 0,
-        closedThisMonth,
+        closedInPeriod,
         unassigned,
         overdueCount,
         byPriority: {
