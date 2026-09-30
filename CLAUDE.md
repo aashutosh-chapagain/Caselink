@@ -31,6 +31,7 @@ Caselink is a case management platform for emergency services / social work team
 | Case auto-activity logging | Done | Title, address, and due date changes create audit entries |
 | Case due dates | Done | Optional `dueAt` field; colour-coded badge in list; Overdue tab; overdue count on dashboard |
 | CSV export | Done | Export button on case list; respects current tab + search; server-side generation |
+| Case create page | Done | Dedicated `/cases/new` page replacing the modal; full-width LocationPicker |
 | Case priority ordering | Done | Critical → High → Medium → Low, then by updatedAt |
 | Case reassignment | Done | Admin only; activity logged |
 | Alerts — admin management | Done | Create, toggle active/inactive, Socket.IO live |
@@ -246,7 +247,8 @@ client/src/
     AcceptInviteView.vue  # Public; validates token on mount, pre-fills email; creates caseworker account
     TeamManageView.vue    # Admin-only: member list, invite modal (generates link), pending invites + revoke
     ProfileView.vue       # Account details (read-only) + inline name edit + change password form
-    CaseListView.vue      # Filter tabs (All/Open/In Progress/Closed/Map) + create modal + Socket.IO
+    CaseListView.vue      # Filter tabs (All/Open/In Progress/Overdue/Closed/Map) + Socket.IO; New Case navigates to /cases/new
+    CaseCreateView.vue    # Dedicated create page (/cases/new) — two-card layout; on success redirects to /cases/:id
     CaseDetailView.vue    # Case header, status buttons, activity timeline, edit mode, add note form
     DashboardView.vue     # Stat cards, charts, stale cases, workload, activity feed, active alerts + map
     AlertsManageView.vue  # Admin-only alert management: create/toggle alerts, active alerts map
@@ -523,6 +525,8 @@ The REST API is intentionally structured for reuse by a future React Native clie
 - **`process.env.JWT_SECRET` is not loaded in tests** — `dotenv.config()` only runs in `index.ts`, which tests never import. `setup.ts` sets `process.env.JWT_SECRET = 'test-secret'` directly. Any new env variable used in routes must be set in `setup.ts` if tests call those routes.
 - **Due date comparison uses `.getTime()`, not string comparison** — `existing.dueAt` is a Mongoose `Date` object; comparing it to a string would always be unequal. Always convert both sides to epoch ms before comparing.
 - **Clearing `dueAt` requires sending `dueAt: null` explicitly** — omitting the field from the PATCH body leaves the existing value unchanged (the `if (dueAt !== undefined)` guard). Client must send `dueAt: null` to remove the due date.
+- **`/cases/new` route must come before `/cases/:id`** — same reason as the export route; Vue Router matches in registration order and would treat "new" as a case ID otherwise.
+- **LocationPicker `region` always overwrites the form field in `CaseCreateView`** — picking a location is an explicit user action so it always wins. The old modal used a guard (`!form.region`) to avoid clobbering manual input on first auto-fill; that guard was removed in the dedicated page.
 - **`GET /cases/export` must come before `GET /:id`** — Express matches routes in registration order; "export" would be treated as a case ID otherwise. Always place specific literal paths before parameterised ones.
 - **CSV export uses `responseType: 'blob'` on the client** — without this, Axios parses the response as text/JSON and the download corrupts. The blob is turned into an object URL and clicked programmatically, then immediately revoked.
 - **`overdueCount` in dashboard uses `$ne: null`** — `{ $lt: now }` alone would match documents where `dueAt` is an old Date; the `$ne: null` guard is belt-and-suspenders to exclude documents where the field is explicitly null vs. missing.

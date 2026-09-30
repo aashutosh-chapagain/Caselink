@@ -2,73 +2,15 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useCasesStore } from '../stores/cases';
-import { getCases, createCase, exportCases, type Case, type CasePriority, type CaseType } from '../api/cases';
+import { getCases, exportCases, type Case } from '../api/cases';
 import { getSocket } from '../api/socket';
-import LocationPicker from '../components/LocationPicker.vue';
 import CasesMap from '../components/CasesMap.vue';
 
 const router = useRouter();
 
 const casesStore = useCasesStore();
 
-const showModal = ref(false);
-const submitting = ref(false);
 const exporting = ref(false);
-const modalError = ref('');
-const form = ref({ title: '', description: '', region: '', priority: 'medium' as CasePriority, type: '' as CaseType | '', address: '', lat: 0, lng: 0, dueAt: '' });
-
-const priorityOptions: { label: string; value: CasePriority }[] = [
-    { label: 'Critical', value: 'critical' },
-    { label: 'High', value: 'high' },
-    { label: 'Medium', value: 'medium' },
-    { label: 'Low', value: 'low' },
-];
-
-const caseTypeOptions: { label: string; value: CaseType }[] = [
-    { label: 'Fire', value: 'fire' },
-    { label: 'Medical', value: 'medical' },
-    { label: 'Welfare Check', value: 'welfare_check' },
-    { label: 'Missing Person', value: 'missing_person' },
-    { label: 'Hazmat', value: 'hazmat' },
-    { label: 'Rescue', value: 'rescue' },
-    { label: 'Other', value: 'other' },
-];
-
-function openModal() {
-    form.value = { title: '', description: '', region: '', priority: 'medium', type: '', address: '', lat: 0, lng: 0, dueAt: '' };
-    modalError.value = '';
-    showModal.value = true;
-}
-
-function onAddressSelect(selected: { address: string; lat: number; lng: number; region: string }) {
-    form.value.address = selected.address;
-    form.value.lat = selected.lat;
-    form.value.lng = selected.lng;
-    if (selected.region) form.value.region = selected.region;
-}
-
-async function submitCase() {
-    if (!form.value.type) {
-        modalError.value = 'Please select a case type';
-        return;
-    }
-    submitting.value = true;
-    modalError.value = '';
-    try {
-        const { address, lat, lng, dueAt, ...rest } = form.value;
-        const payload = {
-            ...rest,
-            ...(address && { address, lat, lng }),
-            ...(dueAt && { dueAt }),
-        };
-        await createCase(payload as Parameters<typeof createCase>[0]);
-        showModal.value = false;
-    } catch (err: any) {
-        modalError.value = err.response?.data?.error || 'Failed to create case';
-    } finally {
-        submitting.value = false;
-    }
-}
 
 const tabs = [
     { label: 'All', value: undefined },
@@ -250,7 +192,7 @@ function dueBadge(dueAt?: string | null): { label: string; cls: string } | null 
                         {{ exporting ? 'Exporting…' : 'Export CSV' }}
                     </button>
                     <button
-                        @click="openModal"
+                        @click="router.push('/cases/new')"
                         class="bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
                     >
                         + New Case
@@ -404,105 +346,4 @@ function dueBadge(dueAt?: string | null): { label: string; cls: string } | null 
         </div>
     </div>
 
-    <!-- Create case modal -->
-    <div v-if="showModal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50" @click.self="showModal = false">
-        <div class="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6">
-            <h2 class="text-lg font-semibold text-slate-800 mb-4">New Case</h2>
-
-            <form @submit.prevent="submitCase" class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-slate-600 mb-1">Title</label>
-                    <input
-                        v-model="form.title"
-                        type="text"
-                        required
-                        class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
-                        placeholder="Case title"
-                    />
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-slate-600 mb-1">Description</label>
-                    <textarea
-                        v-model="form.description"
-                        required
-                        rows="3"
-                        class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm resize-none"
-                        placeholder="Brief description"
-                    />
-                </div>
-                <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <label class="block text-sm font-medium text-slate-600 mb-1">Case Type</label>
-                        <select
-                            v-model="form.type"
-                            required
-                            class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-700"
-                        >
-                            <option value="" disabled>Select type…</option>
-                            <option v-for="opt in caseTypeOptions" :key="opt.value" :value="opt.value">
-                                {{ opt.label }}
-                            </option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-slate-600 mb-1">Priority</label>
-                        <select
-                            v-model="form.priority"
-                            required
-                            class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-700"
-                        >
-                            <option v-for="opt in priorityOptions" :key="opt.value" :value="opt.value">
-                                {{ opt.label }}
-                            </option>
-                        </select>
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-slate-600 mb-1">Region</label>
-                    <input
-                        v-model="form.region"
-                        type="text"
-                        required
-                        class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
-                        placeholder="e.g. Perth Metro"
-                    />
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-slate-600 mb-1">
-                        Due Date <span class="text-slate-400 font-normal">(optional)</span>
-                    </label>
-                    <input
-                        v-model="form.dueAt"
-                        type="date"
-                        class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-700"
-                    />
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-slate-600 mb-1">
-                        Address <span class="text-slate-400 font-normal">(optional)</span>
-                    </label>
-                    <LocationPicker @select="onAddressSelect" />
-                </div>
-
-                <p v-if="modalError" class="text-red-600 text-sm">{{ modalError }}</p>
-
-                <div class="flex justify-end gap-2 pt-2">
-                    <button
-                        type="button"
-                        @click="showModal = false"
-                        class="px-4 py-2 text-sm text-slate-600 hover:text-slate-800 transition-colors"
-                    >
-                        Cancel
-                    </button>
-                    <button
-                        type="submit"
-                        :disabled="submitting"
-                        class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                    >
-                        {{ submitting ? 'Creating...' : 'Create Case' }}
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
 </template>
