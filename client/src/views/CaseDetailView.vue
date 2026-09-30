@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { getCase, updateCase, getActivities, addActivity, type Case, type Activity } from '../api/cases';
+import { getCase, updateCase, getActivities, addActivity, getCases, linkCase, unlinkCase, type Case, type Activity } from '../api/cases';
 import { getUsers, type WorkspaceUser } from '../api/users';
 import { useAuthStore } from '../stores/auth';
 import { getSocket } from '../api/socket';
@@ -176,7 +176,76 @@ onMounted(async () => {
 onUnmounted(() => {
     socket.off('case:updated', onCaseUpdated);
     socket.off('activity:added', onActivityAdded);
+    if (linkDebounce) clearTimeout(linkDebounce);
 });
+
+// --- Case linking ---
+const linkSearch = ref('');
+const linkResults = ref<Case[]>([]);
+const linkSearchLoading = ref(false);
+const linkDropdownOpen = ref(false);
+const linking = ref(false);
+const unlinking = ref<Set<string>>(new Set());
+let linkDebounce: ReturnType<typeof setTimeout> | null = null;
+
+const linkedCases = computed(() => caseData.value?.linkedCaseIds ?? []);
+const linkedIds = computed(() => new Set(linkedCases.value.map(c => c._id)));
+
+function onLinkInput() {
+    if (linkDebounce) clearTimeout(linkDebounce);
+    if (!linkSearch.value.trim()) {
+        linkResults.value = [];
+        linkDropdownOpen.value = false;
+        return;
+    }
+    linkDebounce = setTimeout(async () => {
+        linkSearchLoading.value = true;
+        try {
+            const res = await getCases({ search: linkSearch.value.trim() });
+            linkResults.value = res.data.cases.filter(
+                c => c._id !== id && !linkedIds.value.has(c._id)
+            );
+            linkDropdownOpen.value = true;
+        } catch {
+            linkResults.value = [];
+        } finally {
+            linkSearchLoading.value = false;
+        }
+    }, 300);
+}
+
+async function addLink(targetId: string) {
+    linking.value = true;
+    linkSearch.value = '';
+    linkResults.value = [];
+    linkDropdownOpen.value = false;
+    try {
+        const res = await linkCase(id, targetId);
+        caseData.value = res.data;
+    } catch {
+        // silently ignore — server returns 400 if already linked
+    } finally {
+        linking.value = false;
+    }
+}
+
+function onLinkBlur() {
+    setTimeout(() => { linkDropdownOpen.value = false; }, 150);
+}
+
+async function removeLink(linkedId: string) {
+    const next = new Set(unlinking.value);
+    next.add(linkedId);
+    unlinking.value = next;
+    try {
+        const res = await unlinkCase(id, linkedId);
+        caseData.value = res.data;
+    } finally {
+        const s = new Set(unlinking.value);
+        s.delete(linkedId);
+        unlinking.value = s;
+    }
+}
 </script>
 
 <template>
@@ -364,6 +433,84 @@ onUnmounted(() => {
                             >
                                 {{ statusLabel[s] }}
                             </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Related cases -->
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+                    <h2 class="text-sm font-semibold text-slate-700 mb-4">Related Cases</h2>
+
+                    <!-- Linked list -->
+                    <ul v-if="linkedCases.length > 0" class="divide-y divide-slate-100 mb-4">
+                        <li
+                            v-for="lc in linkedCases"
+                            :key="lc._id"
+                            class="flex items-center gap-3 py-2.5"
+                        >
+                            <button
+                                @click="router.push(`/cases/${lc._id}`)"
+                                class="flex-1 min-w-0 text-left"
+                            >
+                                <span class="block text-sm font-medium text-slate-800 truncate">{{ lc.title }}</span>
+                                <span class="text-xs text-slate-400">{{ lc.region }}</span>
+                            </button>
+                            <span
+                                class="shrink-0 inline-block px-2 py-0.5 rounded-full text-xs font-medium"
+                                :class="priorityStyles[lc.priority]"
+                            >{{ priorityLabel[lc.priority] }}</span>
+                            <span
+                                class="shrink-0 inline-block px-2 py-0.5 rounded-full text-xs font-medium"
+                                :class="statusStyles[lc.status]"
+                            >{{ statusLabel[lc.status] }}</span>
+                            <button
+                                @click="removeLink(lc._id)"
+                                :disabled="unlinking.has(lc._id)"
+                                class="shrink-0 p-1 rounded text-slate-300 hover:text-red-500 hover:bg-red-50 disabled:opacity-40 transition-colors"
+                                title="Remove link"
+                            >
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                </svg>
+                            </button>
+                        </li>
+                    </ul>
+                    <p v-else class="text-sm text-slate-400 mb-4">No related cases linked yet.</p>
+
+                    <!-- Search to add link -->
+                    <div class="relative">
+                        <input
+                            v-model="linkSearch"
+                            @input="onLinkInput"
+                            @blur="onLinkBlur"
+                            type="text"
+                            placeholder="Search cases to link…"
+                            class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                        />
+                        <div
+                            v-if="linkDropdownOpen && linkResults.length > 0"
+                            class="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden"
+                        >
+                            <button
+                                v-for="r in linkResults.slice(0, 6)"
+                                :key="r._id"
+                                @mousedown.prevent="addLink(r._id)"
+                                class="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-slate-50 transition-colors"
+                            >
+                                <div class="flex-1 min-w-0">
+                                    <span class="block text-sm text-slate-800 truncate">{{ r.title }}</span>
+                                    <span class="text-xs text-slate-400">{{ r.region }}</span>
+                                </div>
+                                <span class="shrink-0 text-xs px-2 py-0.5 rounded-full font-medium" :class="priorityStyles[r.priority]">
+                                    {{ priorityLabel[r.priority] }}
+                                </span>
+                            </button>
+                        </div>
+                        <div
+                            v-else-if="linkDropdownOpen && !linkSearchLoading && linkResults.length === 0"
+                            class="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg px-4 py-3 text-sm text-slate-400"
+                        >
+                            No cases found.
                         </div>
                     </div>
                 </div>

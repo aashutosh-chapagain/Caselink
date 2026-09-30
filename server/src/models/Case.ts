@@ -18,6 +18,7 @@ const caseSchema = new Schema({
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     workspaceId: { type: Schema.Types.ObjectId, ref: 'Workspace', required: true },
     dueAt: { type: Date, default: null },
+    linkedCaseIds: [{ type: Schema.Types.ObjectId, ref: 'Case', default: [] }],
 }, { timestamps: true });
 
 caseSchema.index({ title: 'text', description: 'text' });

@@ -199,13 +199,111 @@ router.get('/:id', async (req: AuthedRequest, res) => {
         workspaceId: req.workspaceId,
     })
         .populate('assignedTo', 'name email')
-        .populate('createdBy', 'name email');
+        .populate('createdBy', 'name email')
+        .populate('linkedCaseIds', 'title status priority type region');
 
     if (!found) {
         return res.status(404).json({ error: 'Case not found' });
     }
 
     res.json(found);
+});
+
+// POST /api/v1/cases/:id/links - link two cases (bidirectional)
+router.post('/:id/links', async (req: AuthedRequest, res) => {
+    const { caseId } = req.body;
+
+    if (!caseId) {
+        return res.status(400).json({ error: 'caseId is required' });
+    }
+    if (caseId === req.params.id) {
+        return res.status(400).json({ error: 'Cannot link a case to itself' });
+    }
+
+    const [caseA, caseB] = await Promise.all([
+        CaseModel.findOne({ _id: req.params.id, workspaceId: req.workspaceId }),
+        CaseModel.findOne({ _id: caseId, workspaceId: req.workspaceId }),
+    ]);
+
+    if (!caseA || !caseB) {
+        return res.status(404).json({ error: 'One or both cases not found' });
+    }
+
+    const alreadyLinked = (caseA.linkedCaseIds as mongoose.Types.ObjectId[])
+        .some(id => id.toString() === caseId);
+    if (alreadyLinked) {
+        return res.status(400).json({ error: 'Cases are already linked' });
+    }
+
+    await Promise.all([
+        CaseModel.updateOne({ _id: caseA._id }, { $push: { linkedCaseIds: caseB._id } }),
+        CaseModel.updateOne({ _id: caseB._id }, { $push: { linkedCaseIds: caseA._id } }),
+        Activity.create({
+            caseId: caseA._id, authorId: req.userId,
+            note: `Linked to case: "${caseB.title}"`, type: 'update', workspaceId: req.workspaceId,
+        }),
+        Activity.create({
+            caseId: caseB._id, authorId: req.userId,
+            note: `Linked to case: "${caseA.title}"`, type: 'update', workspaceId: req.workspaceId,
+        }),
+    ]);
+
+    const [populatedA, populatedB] = await Promise.all([
+        CaseModel.findById(caseA._id)
+            .populate('assignedTo', 'name email').populate('createdBy', 'name email')
+            .populate('linkedCaseIds', 'title status priority type region'),
+        CaseModel.findById(caseB._id)
+            .populate('assignedTo', 'name email').populate('createdBy', 'name email')
+            .populate('linkedCaseIds', 'title status priority type region'),
+    ]);
+
+    const io = req.app.get('io');
+    io.to(`workspace:${req.workspaceId}`).emit('case:updated', populatedA);
+    io.to(`workspace:${req.workspaceId}`).emit('case:updated', populatedB);
+
+    res.json(populatedA);
+});
+
+// DELETE /api/v1/cases/:id/links/:linkedId - remove a link (bidirectional)
+router.delete('/:id/links/:linkedId', async (req: AuthedRequest, res) => {
+    const { id, linkedId } = req.params;
+
+    const [caseA, caseB] = await Promise.all([
+        CaseModel.findOne({ _id: id, workspaceId: req.workspaceId }),
+        CaseModel.findOne({ _id: linkedId, workspaceId: req.workspaceId }),
+    ]);
+
+    if (!caseA || !caseB) {
+        return res.status(404).json({ error: 'One or both cases not found' });
+    }
+
+    await Promise.all([
+        CaseModel.updateOne({ _id: caseA._id }, { $pull: { linkedCaseIds: caseB._id } }),
+        CaseModel.updateOne({ _id: caseB._id }, { $pull: { linkedCaseIds: caseA._id } }),
+        Activity.create({
+            caseId: caseA._id, authorId: req.userId,
+            note: `Removed link to case: "${caseB.title}"`, type: 'update', workspaceId: req.workspaceId,
+        }),
+        Activity.create({
+            caseId: caseB._id, authorId: req.userId,
+            note: `Removed link to case: "${caseA.title}"`, type: 'update', workspaceId: req.workspaceId,
+        }),
+    ]);
+
+    const [populatedA, populatedB] = await Promise.all([
+        CaseModel.findById(caseA._id)
+            .populate('assignedTo', 'name email').populate('createdBy', 'name email')
+            .populate('linkedCaseIds', 'title status priority type region'),
+        CaseModel.findById(caseB._id)
+            .populate('assignedTo', 'name email').populate('createdBy', 'name email')
+            .populate('linkedCaseIds', 'title status priority type region'),
+    ]);
+
+    const io = req.app.get('io');
+    io.to(`workspace:${req.workspaceId}`).emit('case:updated', populatedA);
+    io.to(`workspace:${req.workspaceId}`).emit('case:updated', populatedB);
+
+    res.json(populatedA);
 });
 
 // PATCH /api/v1/cases/bulk - bulk update status on multiple cases

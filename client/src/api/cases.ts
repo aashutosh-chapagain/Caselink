@@ -9,6 +9,15 @@ export interface CaseUser {
 export type CasePriority = 'critical' | 'high' | 'medium' | 'low';
 export type CaseType = 'fire' | 'medical' | 'welfare_check' | 'missing_person' | 'hazmat' | 'rescue' | 'other';
 
+export interface LinkedCase {
+    _id: string;
+    title: string;
+    status: 'open' | 'in_progress' | 'closed';
+    priority: CasePriority;
+    type: CaseType;
+    region: string;
+}
+
 export interface Case {
     _id: string;
     title: string;
@@ -24,6 +33,7 @@ export interface Case {
     createdBy: CaseUser | null;
     workspaceId: string;
     dueAt?: string | null;
+    linkedCaseIds: LinkedCase[];
     createdAt: string;
     updatedAt: string;
 }
@@ -91,4 +101,12 @@ export function getActivities(caseId: string, params?: { limit?: number; before?
 
 export function addActivity(caseId: string, note: string) {
     return client.post<Activity>(`/cases/${caseId}/activities`, { note });
+}
+
+export function linkCase(id: string, caseId: string) {
+    return client.post<Case>(`/cases/${id}/links`, { caseId });
+}
+
+export function unlinkCase(id: string, linkedId: string) {
+    return client.delete<Case>(`/cases/${id}/links/${linkedId}`);
 }
