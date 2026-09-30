@@ -53,6 +53,10 @@ export function exportCases(params?: { status?: string; search?: string; overdue
     return client.get('/cases/export', { params, responseType: 'blob' });
 }
 
+export function bulkUpdateCases(ids: string[], status: string) {
+    return client.patch<{ updated: number }>('/cases/bulk', { ids, status });
+}
+
 export function createCase(payload: CreateCasePayload) {
     return client.post<Case>('/cases', payload);
 }

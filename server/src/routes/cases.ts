@@ -208,6 +208,57 @@ router.get('/:id', async (req: AuthedRequest, res) => {
     res.json(found);
 });
 
+// PATCH /api/v1/cases/bulk - bulk update status on multiple cases
+router.patch('/bulk', async (req: AuthedRequest, res) => {
+    const { ids, status } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ error: 'ids must be a non-empty array' });
+    }
+    if (ids.length > 100) {
+        return res.status(400).json({ error: 'Cannot bulk update more than 100 cases at once' });
+    }
+
+    const validStatuses = ['open', 'in_progress', 'closed'];
+    if (!validStatuses.includes(status)) {
+        return res.status(400).json({ error: 'Invalid status' });
+    }
+
+    const caseworkerFilter = req.role === 'caseworker'
+        ? { assignedTo: new mongoose.Types.ObjectId(req.userId) }
+        : {};
+
+    // Only fetch cases that actually need a status change
+    const cases = await CaseModel.find({
+        _id: { $in: ids },
+        workspaceId: new mongoose.Types.ObjectId(req.workspaceId),
+        ...caseworkerFilter,
+        status: { $ne: status },
+    });
+
+    await Promise.all(cases.map(async (existing) => {
+        const oldStatus = existing.status;
+        existing.status = status;
+        await existing.save();
+
+        await Activity.create({
+            caseId: existing._id,
+            authorId: req.userId,
+            note: `Status changed from ${oldStatus} to ${status}`,
+            type: 'status_change',
+            workspaceId: req.workspaceId,
+        });
+
+        const populated = await existing.populate([
+            { path: 'assignedTo', select: 'name email' },
+            { path: 'createdBy', select: 'name email' },
+        ]);
+        req.app.get('io').to(`workspace:${req.workspaceId}`).emit('case:updated', populated);
+    }));
+
+    res.json({ updated: cases.length });
+});
+
 // PATCH /api/v1/cases/:id - update status, assignee, title, or description
 router.patch('/:id', async (req: AuthedRequest, res) => {
     const { status, assignedTo, title, description, address, lat, lng, dueAt } = req.body;

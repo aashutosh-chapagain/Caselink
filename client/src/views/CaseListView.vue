@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useCasesStore } from '../stores/cases';
-import { getCases, exportCases, type Case } from '../api/cases';
+import { getCases, exportCases, bulkUpdateCases, type Case } from '../api/cases';
 import { getSocket } from '../api/socket';
 import CasesMap from '../components/CasesMap.vue';
 
@@ -11,6 +11,8 @@ const router = useRouter();
 const casesStore = useCasesStore();
 
 const exporting = ref(false);
+const bulkUpdating = ref(false);
+const selectedIds = ref<Set<string>>(new Set());
 
 const tabs = [
     { label: 'All', value: undefined },
@@ -69,10 +71,45 @@ const isLoading = computed(() => {
     return activeTab.value === 'closed' ? casesStore.closedLoading : casesStore.loading;
 });
 
+const allSelected = computed(() =>
+    displayedCases.value.length > 0 &&
+    displayedCases.value.every(c => selectedIds.value.has(c._id))
+);
+const someSelected = computed(() =>
+    displayedCases.value.some(c => selectedIds.value.has(c._id)) && !allSelected.value
+);
+
 function selectTab(value: string | undefined) {
     activeTab.value = value;
+    selectedIds.value = new Set();
     if (!isSearching.value && value === 'closed' && casesStore.closedCases.length === 0) {
         casesStore.fetchClosedCases();
+    }
+}
+
+function toggleSelect(id: string) {
+    const next = new Set(selectedIds.value);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    selectedIds.value = next;
+}
+
+function toggleSelectAll() {
+    selectedIds.value = allSelected.value
+        ? new Set()
+        : new Set(displayedCases.value.map(c => c._id));
+}
+
+async function bulkUpdateStatus(status: string) {
+    if (selectedIds.value.size === 0) return;
+    bulkUpdating.value = true;
+    try {
+        await bulkUpdateCases([...selectedIds.value], status);
+        selectedIds.value = new Set();
+    } catch {
+        // silently ignore
+    } finally {
+        bulkUpdating.value = false;
     }
 }
 
@@ -275,6 +312,15 @@ function dueBadge(dueAt?: string | null): { label: string; cls: string } | null 
                     <table class="w-full text-sm">
                         <thead class="bg-slate-50 border-b border-slate-200">
                             <tr>
+                                <th class="px-4 py-3 w-8">
+                                    <input
+                                        type="checkbox"
+                                        :checked="allSelected"
+                                        :ref="(el) => { if (el) (el as HTMLInputElement).indeterminate = someSelected; }"
+                                        @change="toggleSelectAll"
+                                        class="rounded border-slate-300 text-blue-600 cursor-pointer"
+                                    />
+                                </th>
                                 <th class="text-left px-4 py-3 font-medium text-slate-600">Title</th>
                                 <th class="text-left px-4 py-3 font-medium text-slate-600">Type</th>
                                 <th class="text-left px-4 py-3 font-medium text-slate-600">Priority</th>
@@ -286,7 +332,7 @@ function dueBadge(dueAt?: string | null): { label: string; cls: string } | null 
                         </thead>
                         <tbody>
                             <tr v-if="displayedCases.length === 0">
-                                <td colspan="6" class="px-4 py-8 text-center text-slate-400">
+                                <td colspan="8" class="px-4 py-8 text-center text-slate-400">
                                     {{ isSearching ? `No cases found matching "${searchQuery}".` : 'No cases found.' }}
                                 </td>
                             </tr>
@@ -294,8 +340,17 @@ function dueBadge(dueAt?: string | null): { label: string; cls: string } | null 
                                 v-for="c in displayedCases"
                                 :key="c._id"
                                 class="border-b border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer"
+                                :class="selectedIds.has(c._id) ? 'bg-blue-50 hover:bg-blue-50' : ''"
                                 @click="$router.push(`/cases/${c._id}`)"
                             >
+                                <td class="px-4 py-3 w-8" @click.stop>
+                                    <input
+                                        type="checkbox"
+                                        :checked="selectedIds.has(c._id)"
+                                        @change="toggleSelect(c._id)"
+                                        class="rounded border-slate-300 text-blue-600 cursor-pointer"
+                                    />
+                                </td>
                                 <td class="px-4 py-3">
                                     <span class="font-medium text-slate-800">{{ c.title }}</span>
                                     <span
@@ -345,5 +400,45 @@ function dueBadge(dueAt?: string | null): { label: string; cls: string } | null 
             </template>
         </div>
     </div>
+
+    <!-- Bulk action bar -->
+    <Transition
+        enter-active-class="transition ease-out duration-150"
+        enter-from-class="opacity-0 translate-y-3"
+        enter-to-class="opacity-100 translate-y-0"
+        leave-active-class="transition ease-in duration-100"
+        leave-from-class="opacity-100 translate-y-0"
+        leave-to-class="opacity-0 translate-y-3"
+    >
+        <div
+            v-if="selectedIds.size > 0"
+            class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white rounded-xl shadow-xl px-5 py-3 flex items-center gap-4 z-40 whitespace-nowrap"
+        >
+            <span class="text-sm font-medium">{{ selectedIds.size }} selected</span>
+            <div class="w-px h-4 bg-slate-600 shrink-0"></div>
+            <div class="flex items-center gap-2">
+                <button
+                    @click="bulkUpdateStatus('open')"
+                    :disabled="bulkUpdating"
+                    class="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-500 hover:bg-blue-400 disabled:opacity-50 transition-colors"
+                >Open</button>
+                <button
+                    @click="bulkUpdateStatus('in_progress')"
+                    :disabled="bulkUpdating"
+                    class="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 transition-colors"
+                >In Progress</button>
+                <button
+                    @click="bulkUpdateStatus('closed')"
+                    :disabled="bulkUpdating"
+                    class="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-600 hover:bg-slate-500 disabled:opacity-50 transition-colors"
+                >Closed</button>
+            </div>
+            <div class="w-px h-4 bg-slate-600 shrink-0"></div>
+            <button
+                @click="selectedIds = new Set()"
+                class="text-xs text-slate-400 hover:text-white transition-colors"
+            >✕ Clear</button>
+        </div>
+    </Transition>
 
 </template>

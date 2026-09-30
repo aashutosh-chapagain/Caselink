@@ -32,6 +32,7 @@ Caselink is a case management platform for emergency services / social work team
 | Case due dates | Done | Optional `dueAt` field; colour-coded badge in list; Overdue tab; overdue count on dashboard |
 | CSV export | Done | Export button on case list; respects current tab + search; server-side generation |
 | Case create page | Done | Dedicated `/cases/new` page replacing the modal; full-width LocationPicker |
+| Bulk status update | Done | Checkbox select on case list + floating action bar; server-enforced role scoping |
 | Case priority ordering | Done | Critical → High → Medium → Low, then by updatedAt |
 | Case reassignment | Done | Admin only; activity logged |
 | Alerts — admin management | Done | Create, toggle active/inactive, Socket.IO live |
@@ -452,6 +453,20 @@ Client behaviour in `CaseListView`:
 - Socket.IO `case:updated` patches header live; `activity:added` appends to timeline
 - Both socket listeners filter by case ID to avoid cross-case pollution
 
+### Bulk status update
+
+`PATCH /api/v1/cases/bulk` — **must come before `PATCH /:id`** or "bulk" is treated as a case ID. Accepts `{ ids: string[], status: string }`. Max 100 IDs per request.
+
+Server applies the same workspace + role scoping as the list route: caseworkers can only update cases where `assignedTo === userId`. Cases already at the target status are silently skipped (filtered with `status: { $ne: status }` in the query). An activity entry (`status_change`) is logged and `case:updated` emitted for each actually-changed case.
+
+Client:
+- `selectedIds: Set<string>` — Set chosen over array for O(1) `.has()` in the template. Mutated by creating a new Set (Vue reactivity requires reference change to trigger updates).
+- Select-all checkbox uses the HTML `indeterminate` property (set via `:ref` callback) to show a dash when some-but-not-all rows are selected.
+- `@click.stop` on the checkbox cell prevents row click (navigate to case detail) from firing when the checkbox is clicked.
+- Selection is cleared on tab switch (watched via `selectTab`).
+- Floating action bar uses `<Transition>` for slide-up animation; `whitespace-nowrap` prevents wrapping on narrow screens.
+- After bulk update, the list updates automatically via Socket.IO `case:updated` events — no manual refetch needed.
+
 ### CaseListView behaviour
 
 - All/Open/In Progress tabs filter `activeCases` client-side (no extra requests)
@@ -459,6 +474,7 @@ Client behaviour in `CaseListView`:
 - Closed tab: paginated, triggers fetch on first visit, "Load more" appends
 - Map tab: `CasesMap` over `mappableCases` (active cases with coordinates)
 - Socket.IO `case:created` / `case:updated` keep all tabs live
+- Bulk select: checkboxes on every list row; action bar floats at bottom when any selected
 
 ### Dashboard
 
@@ -525,6 +541,7 @@ The REST API is intentionally structured for reuse by a future React Native clie
 - **`process.env.JWT_SECRET` is not loaded in tests** — `dotenv.config()` only runs in `index.ts`, which tests never import. `setup.ts` sets `process.env.JWT_SECRET = 'test-secret'` directly. Any new env variable used in routes must be set in `setup.ts` if tests call those routes.
 - **Due date comparison uses `.getTime()`, not string comparison** — `existing.dueAt` is a Mongoose `Date` object; comparing it to a string would always be unequal. Always convert both sides to epoch ms before comparing.
 - **Clearing `dueAt` requires sending `dueAt: null` explicitly** — omitting the field from the PATCH body leaves the existing value unchanged (the `if (dueAt !== undefined)` guard). Client must send `dueAt: null` to remove the due date.
+- **`PATCH /cases/bulk` must come before `PATCH /:id`** — "bulk" would be treated as a case ID otherwise. Same ordering rule applies to all literal-path routes under a parameterised segment.
 - **`/cases/new` route must come before `/cases/:id`** — same reason as the export route; Vue Router matches in registration order and would treat "new" as a case ID otherwise.
 - **LocationPicker `region` always overwrites the form field in `CaseCreateView`** — picking a location is an explicit user action so it always wins. The old modal used a guard (`!form.region`) to avoid clobbering manual input on first auto-fill; that guard was removed in the dedicated page.
 - **`GET /cases/export` must come before `GET /:id`** — Express matches routes in registration order; "export" would be treated as a case ID otherwise. Always place specific literal paths before parameterised ones.
