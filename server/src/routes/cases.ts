@@ -131,6 +131,67 @@ router.post('/', async (req: AuthedRequest, res) => {
     res.status(201).json(populated);
 });
 
+// GET /api/v1/cases/export - download all matching cases as CSV
+router.get('/export', async (req: AuthedRequest, res) => {
+    const { status, search, overdue } = req.query as Record<string, string>;
+
+    const filter: Record<string, unknown> = {
+        workspaceId: new mongoose.Types.ObjectId(req.workspaceId),
+    };
+
+    if (req.role === 'caseworker') {
+        filter.assignedTo = new mongoose.Types.ObjectId(req.userId);
+    }
+
+    if (overdue === 'true') {
+        filter.status = { $in: ['open', 'in_progress'] };
+        filter.dueAt = { $lt: new Date(), $ne: null };
+    } else if (status) {
+        const statuses = status.split(',');
+        filter.status = statuses.length > 1 ? { $in: statuses } : statuses[0];
+    }
+
+    if (search && search.trim()) {
+        const escaped = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        filter.$or = [
+            { title:       { $regex: escaped, $options: 'i' } },
+            { description: { $regex: escaped, $options: 'i' } },
+            { region:      { $regex: escaped, $options: 'i' } },
+            { address:     { $regex: escaped, $options: 'i' } },
+        ];
+    }
+
+    const cases = await CaseModel.find(filter)
+        .populate('assignedTo', 'name')
+        .populate('createdBy', 'name')
+        .sort({ createdAt: -1 })
+        .lean();
+
+    function escapeCsv(val: unknown): string {
+        if (val == null) return '';
+        const str = String(val);
+        return str.includes(',') || str.includes('"') || str.includes('\n')
+            ? `"${str.replace(/"/g, '""')}"`
+            : str;
+    }
+
+    function fmtDate(d: unknown): string {
+        if (!d) return '';
+        return new Date(d as string).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+
+    const headers = ['ID', 'Title', 'Type', 'Priority', 'Status', 'Region', 'Assigned To', 'Created By', 'Due Date', 'Address', 'Created'];
+    const rows = (cases as any[]).map(c =>
+        [c._id, c.title, c.type, c.priority, c.status, c.region, c.assignedTo?.name, c.createdBy?.name, c.dueAt ? fmtDate(c.dueAt) : '', c.address, fmtDate(c.createdAt)]
+            .map(escapeCsv).join(',')
+    );
+
+    const date = new Date().toISOString().split('T')[0];
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="cases-${date}.csv"`);
+    res.send([headers.join(','), ...rows].join('\n'));
+});
+
 // GET /api/v1/cases/:id - get one case (workspace-scoped)
 router.get('/:id', async (req: AuthedRequest, res) => {
     const found = await CaseModel.findOne({

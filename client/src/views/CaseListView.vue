@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useCasesStore } from '../stores/cases';
-import { getCases, createCase, type Case, type CasePriority, type CaseType } from '../api/cases';
+import { getCases, createCase, exportCases, type Case, type CasePriority, type CaseType } from '../api/cases';
 import { getSocket } from '../api/socket';
 import LocationPicker from '../components/LocationPicker.vue';
 import CasesMap from '../components/CasesMap.vue';
@@ -13,6 +13,7 @@ const casesStore = useCasesStore();
 
 const showModal = ref(false);
 const submitting = ref(false);
+const exporting = ref(false);
 const modalError = ref('');
 const form = ref({ title: '', description: '', region: '', priority: 'medium' as CasePriority, type: '' as CaseType | '', address: '', lat: 0, lng: 0, dueAt: '' });
 
@@ -198,6 +199,31 @@ function formatDate(iso: string) {
     });
 }
 
+async function downloadCsv() {
+    exporting.value = true;
+    try {
+        const params: Record<string, string> = {};
+        if (activeTab.value === 'overdue') {
+            params.overdue = 'true';
+        } else if (activeTab.value && activeTab.value !== 'map') {
+            params.status = activeTab.value;
+        }
+        if (isSearching.value) params.search = searchQuery.value.trim();
+
+        const res = await exportCases(params);
+        const url = URL.createObjectURL(res.data as Blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `cases-${new Date().toISOString().split('T')[0]}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    } catch {
+        // silently ignore — network errors handled by axios interceptor
+    } finally {
+        exporting.value = false;
+    }
+}
+
 function dueBadge(dueAt?: string | null): { label: string; cls: string } | null {
     if (!dueAt) return null;
     const now = new Date();
@@ -215,12 +241,21 @@ function dueBadge(dueAt?: string | null): { label: string; cls: string } | null 
         <div class="max-w-6xl mx-auto px-6 py-8">
             <div class="flex items-center justify-between mb-6">
                 <h1 class="text-2xl font-bold text-slate-800">Cases</h1>
-                <button
-                    @click="openModal"
-                    class="bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                    + New Case
-                </button>
+                <div class="flex items-center gap-2">
+                    <button
+                        @click="downloadCsv"
+                        :disabled="exporting"
+                        class="text-sm text-slate-600 border border-slate-300 px-4 py-2 rounded-lg hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                    >
+                        {{ exporting ? 'Exporting…' : 'Export CSV' }}
+                    </button>
+                    <button
+                        @click="openModal"
+                        class="bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                        + New Case
+                    </button>
+                </div>
             </div>
 
             <!-- Search -->

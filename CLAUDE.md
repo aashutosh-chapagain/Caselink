@@ -30,6 +30,7 @@ Caselink is a case management platform for emergency services / social work team
 | Case activity timeline | Done | Notes, status changes, reassignments, field edits |
 | Case auto-activity logging | Done | Title, address, and due date changes create audit entries |
 | Case due dates | Done | Optional `dueAt` field; colour-coded badge in list; Overdue tab; overdue count on dashboard |
+| CSV export | Done | Export button on case list; respects current tab + search; server-side generation |
 | Case priority ordering | Done | Critical → High → Medium → Low, then by updatedAt |
 | Case reassignment | Done | Admin only; activity logged |
 | Alerts — admin management | Done | Create, toggle active/inactive, Socket.IO live |
@@ -370,6 +371,18 @@ Activity `type` enum: `note | status_change | assignment | update`. Client `Acti
 
 Activity badge colours in CaseDetailView: note=slate, status_change=blue, assignment=purple, update=amber.
 
+### CSV export
+
+`GET /api/v1/cases/export` — server-side CSV generation. **Must be registered before `GET /:id`** or Express matches the literal string "export" as a case ID.
+
+Accepts: `status` (comma-separated), `search`, `overdue=true`. Applies the same workspace + role scoping as the list route. No pagination — returns all matching rows.
+
+Uses `.find().lean()` (not aggregation) for simplicity. `lean()` returns plain objects, avoiding Mongoose overhead for a read-only export. Fields: ID, Title, Type, Priority, Status, Region, Assigned To, Created By, Due Date, Address, Created.
+
+CSV escaping: fields containing commas, quotes, or newlines are wrapped in double-quotes with internal quotes doubled (`"` → `""`). Plain `String(val)` handles ObjectId and Date coercion.
+
+Client: `exportCases()` in `api/cases.ts` uses `responseType: 'blob'`. `downloadCsv()` in `CaseListView` creates a temporary object URL, programmatically clicks an `<a>` element, then revokes the URL. The button passes the current active tab and search query so the export matches what the user sees.
+
 ### Address autocomplete / LocationPicker
 
 `client/src/components/LocationPicker.vue` — reusable component combining Nominatim address search with an interactive Leaflet map.
@@ -510,6 +523,8 @@ The REST API is intentionally structured for reuse by a future React Native clie
 - **`process.env.JWT_SECRET` is not loaded in tests** — `dotenv.config()` only runs in `index.ts`, which tests never import. `setup.ts` sets `process.env.JWT_SECRET = 'test-secret'` directly. Any new env variable used in routes must be set in `setup.ts` if tests call those routes.
 - **Due date comparison uses `.getTime()`, not string comparison** — `existing.dueAt` is a Mongoose `Date` object; comparing it to a string would always be unequal. Always convert both sides to epoch ms before comparing.
 - **Clearing `dueAt` requires sending `dueAt: null` explicitly** — omitting the field from the PATCH body leaves the existing value unchanged (the `if (dueAt !== undefined)` guard). Client must send `dueAt: null` to remove the due date.
+- **`GET /cases/export` must come before `GET /:id`** — Express matches routes in registration order; "export" would be treated as a case ID otherwise. Always place specific literal paths before parameterised ones.
+- **CSV export uses `responseType: 'blob'` on the client** — without this, Axios parses the response as text/JSON and the download corrupts. The blob is turned into an object URL and clicked programmatically, then immediately revoked.
 - **`overdueCount` in dashboard uses `$ne: null`** — `{ $lt: now }` alone would match documents where `dueAt` is an old Date; the `$ne: null` guard is belt-and-suspenders to exclude documents where the field is explicitly null vs. missing.
 
 ---

@@ -49,6 +49,10 @@ export function getCases(params?: { status?: string; cursor?: string; limit?: nu
     return client.get<CasesResponse>('/cases', { params });
 }
 
+export function exportCases(params?: { status?: string; search?: string; overdue?: string }) {
+    return client.get('/cases/export', { params, responseType: 'blob' });
+}
+
 export function createCase(payload: CreateCasePayload) {
     return client.post<Case>('/cases', payload);
 }
