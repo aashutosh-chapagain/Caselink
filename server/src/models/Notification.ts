@@ -3,7 +3,7 @@ import mongoose, { Schema } from 'mongoose';
 const NotificationSchema = new Schema({
     userId:      { type: Schema.Types.ObjectId, ref: 'User',      required: true },
     workspaceId: { type: Schema.Types.ObjectId, ref: 'Workspace', required: true },
-    type:        { type: String, enum: ['assignment'], required: true },
+    type:        { type: String, enum: ['assignment', 'overdue'], required: true },
     message:     { type: String, required: true },
     caseId:      { type: Schema.Types.ObjectId, ref: 'Case',      required: true },
     read:        { type: Boolean, default: false },

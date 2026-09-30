@@ -357,9 +357,9 @@ router.patch('/bulk', async (req: AuthedRequest, res) => {
     res.json({ updated: cases.length });
 });
 
-// PATCH /api/v1/cases/:id - update status, assignee, title, or description
+// PATCH /api/v1/cases/:id - update status, assignee, title, description, priority, type, address, dueAt
 router.patch('/:id', async (req: AuthedRequest, res) => {
-    const { status, assignedTo, title, description, address, lat, lng, dueAt } = req.body;
+    const { status, assignedTo, title, description, priority, type, address, lat, lng, dueAt } = req.body;
 
     if (assignedTo !== undefined && req.role !== 'admin') {
         return res.status(403).json({ error: 'Only admins can reassign cases' });
@@ -368,6 +368,16 @@ router.patch('/:id', async (req: AuthedRequest, res) => {
     const validStatuses = ['open', 'in_progress', 'closed'];
     if (status !== undefined && !validStatuses.includes(status)) {
         return res.status(400).json({ error: 'Invalid status' });
+    }
+
+    const validPriorities = ['critical', 'high', 'medium', 'low'];
+    if (priority !== undefined && !validPriorities.includes(priority)) {
+        return res.status(400).json({ error: 'Invalid priority' });
+    }
+
+    const validTypes = ['fire', 'medical', 'welfare_check', 'missing_person', 'hazmat', 'rescue', 'other'];
+    if (type !== undefined && !validTypes.includes(type)) {
+        return res.status(400).json({ error: 'Invalid case type' });
     }
 
     if (title !== undefined && !title.trim()) {
@@ -384,6 +394,32 @@ router.patch('/:id', async (req: AuthedRequest, res) => {
     }
 
     const activityLogs: Promise<any>[] = [];
+
+    if (priority !== undefined && priority !== existing.priority) {
+        activityLogs.push(
+            Activity.create({
+                caseId: existing._id,
+                authorId: req.userId,
+                note: `Priority changed from ${existing.priority} to ${priority}`,
+                type: 'update',
+                workspaceId: req.workspaceId,
+            })
+        );
+        existing.priority = priority;
+    }
+
+    if (type !== undefined && type !== existing.type) {
+        activityLogs.push(
+            Activity.create({
+                caseId: existing._id,
+                authorId: req.userId,
+                note: `Type changed from ${existing.type.replace(/_/g, ' ')} to ${type.replace(/_/g, ' ')}`,
+                type: 'update',
+                workspaceId: req.workspaceId,
+            })
+        );
+        existing.type = type;
+    }
 
     if (title !== undefined && title.trim() !== existing.title) {
         activityLogs.push(
@@ -438,6 +474,7 @@ router.patch('/:id', async (req: AuthedRequest, res) => {
                 })
             );
             (existing as any).dueAt = newDueAt;
+            (existing as any).overdueNotifiedAt = null; // reset so re-notification fires if new date also passes
         }
     }
 

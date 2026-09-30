@@ -75,7 +75,7 @@ export function getCase(id: string) {
     return client.get<Case>(`/cases/${id}`);
 }
 
-export function updateCase(id: string, patch: { status?: Case['status']; assignedTo?: string; title?: string; description?: string; address?: string; lat?: number; lng?: number; dueAt?: string | null }) {
+export function updateCase(id: string, patch: { status?: Case['status']; priority?: CasePriority; type?: CaseType; assignedTo?: string; title?: string; description?: string; address?: string; lat?: number; lng?: number; dueAt?: string | null }) {
     return client.patch<Case>(`/cases/${id}`, patch);
 }
 

@@ -34,7 +34,10 @@ Caselink is a case management platform for emergency services / social work team
 | Case create page | Done | Dedicated `/cases/new` page replacing the modal; full-width LocationPicker |
 | Bulk status update | Done | Checkbox select on case list + floating action bar; server-enforced role scoping |
 | Case priority ordering | Done | Critical → High → Medium → Low, then by updatedAt |
+| Case priority/type editing | Done | Both editable after creation via PATCH; activity-logged with old+new values |
 | Case reassignment | Done | Admin only; activity logged |
+| Case linking | Done | Bidirectional related-case associations; searchable from detail view; activity-logged on both sides |
+| Overdue escalation notifications | Done | Daily 08:00 cron notifies assignee + all admins when dueAt passes; fires once per case; resets if due date changes |
 | Alerts — admin management | Done | Create, toggle active/inactive, Socket.IO live |
 | Alerts — public page | Done | No auth, polls every 30s, workspace scoped |
 | Alerts — in-app banners | Done | Critical + High banners, per-alert dismissable |
@@ -198,15 +201,16 @@ server/src/
   models/
     User.ts           # name, email, passwordHash, role, workspaceId, isActive (default true)
     Workspace.ts      # name
-    Case.ts           # title, description, status, priority, type, region, address, lat, lng, assignedTo, createdBy, workspaceId
+    Case.ts           # title, description, status, priority, type, region, address, lat, lng, assignedTo, createdBy, workspaceId, dueAt, overdueNotifiedAt, linkedCaseIds
     Activity.ts       # caseId, authorId, note, type (note|status_change|assignment|update), workspaceId
     Alert.ts          # message, severity, region, lat, lng, isActive, createdBy, workspaceId
     Invite.ts         # email, workspaceId, token (UUID), expiresAt (7d), used, createdBy
-    Notification.ts   # userId, workspaceId, type (assignment), message, caseId, read; index on userId+createdAt
+    Notification.ts   # userId, workspaceId, type (assignment|overdue), message, caseId, read; index on userId+createdAt
   routes/
     auth.ts           # POST /register (admin + new workspace), POST /login,
                       # GET /invite/:token (public, pre-fill), POST /accept-invite (public, create caseworker)
-    cases.ts          # CRUD under /api/v1/cases — emits case:created / case:updated via Socket.IO
+    cases.ts          # CRUD under /api/v1/cases — emits case:created / case:updated via Socket.IO;
+                      # POST/DELETE /:id/links for bidirectional case linking
     activities.ts     # GET/POST /api/v1/cases/:caseId/activities — emits activity:added
     users.ts          # GET /users (workspace list), GET /users/me, PATCH /users/me (name), PATCH /users/me/password
     invites.ts        # POST / GET / DELETE /api/v1/invites — admin only (requireAuth + requireAdmin at router level)
@@ -215,6 +219,7 @@ server/src/
     notifications.ts  # GET / (last 20 for user), PATCH /read (mark all read)
   scripts/
     seed.ts           # Demo data seeder (destructive — clears all collections)
+    checkOverdue.ts   # Overdue escalation logic — called by cron in index.ts; notifies assignee + admins, logs activity, sets overdueNotifiedAt
     socket-test-client.ts  # Manual Socket.IO test harness
 ```
 
@@ -508,6 +513,32 @@ Charts use `computed(): ApexOptions` — the explicit return type is required or
 
 **Banners**: critical + high alerts render below nav bar; per-alert dismiss is session-local.
 
+### Case linking
+
+`POST /api/v1/cases/:id/links` — body `{ caseId }`. Validates both cases exist in the same workspace, rejects self-links and duplicates. Updates `linkedCaseIds` on both documents with `$push` (bidirectional). Logs `"Linked to case: [title]"` activity on each. Emits `case:updated` on both.
+
+`DELETE /api/v1/cases/:id/links/:linkedId` — removes the link from both sides with `$pull`. Logs `"Removed link to case: [title]"` activity on each. Emits `case:updated` on both.
+
+`GET /cases/:id` populates `linkedCaseIds` with `title, status, priority, type, region` — enough to render the Related Cases card without a second request.
+
+Client (`CaseDetailView`): Related Cases card sits between the metadata grid and the activity timeline. Lists linked cases with priority + status badges; × removes a link. Inline search (debounced 300ms, reuses `getCases({ search })`) shows a dropdown of candidates filtered to exclude the current case and already-linked cases. `mousedown.prevent` on dropdown options prevents blur from closing the dropdown before the click registers.
+
+### Case priority and type editing
+
+`PATCH /cases/:id` now accepts `priority` and `type` with the same validation as case creation. Changes are activity-logged as type `update` with the old and new values: `"Priority changed from high to critical"`, `"Type changed from fire to rescue"` (underscores replaced with spaces for readability). `startEdit()` in CaseDetailView populates `editPriority` and `editType` refs; `saveEdit()` always sends both fields so they're never accidentally cleared.
+
+### Overdue escalation notifications
+
+**Model fields on Case**: `overdueNotifiedAt: Date | null` — null means not yet notified; set to `now` after escalation fires. Prevents duplicate notifications without querying the Notification collection.
+
+**Cron** (`scripts/checkOverdue.ts`): called from `index.ts` via `node-cron` at `'0 8 * * *'` (08:00 daily). Query: `{ status: { $in: ['open', 'in_progress'] }, dueAt: { $lt: now, $ne: null }, overdueNotifiedAt: null }`. For each matching case: creates one Notification per recipient (assignee + all active workspace admins), emits `notification:new` to each personal Socket.IO room, logs `"Case escalated — past due date"` activity (type: `update`), then sets `overdueNotifiedAt = now`.
+
+**Reset**: `PATCH /cases/:id` resets `overdueNotifiedAt` to `null` when `dueAt` changes — so if a due date is extended and then passes again, the escalation fires a second time.
+
+**Notification type**: `'overdue'` added to Notification model enum alongside `'assignment'`. Client notification bell renders `notification.message` regardless of type — no client changes needed.
+
+**Cron is wired in `index.ts` only** — not in `app.ts` — so tests never trigger it.
+
 ---
 
 ## Design notes
@@ -554,6 +585,12 @@ The REST API is intentionally structured for reuse by a future React Native clie
 - **`GET /cases/export` must come before `GET /:id`** — Express matches routes in registration order; "export" would be treated as a case ID otherwise. Always place specific literal paths before parameterised ones.
 - **CSV export uses `responseType: 'blob'` on the client** — without this, Axios parses the response as text/JSON and the download corrupts. The blob is turned into an object URL and clicked programmatically, then immediately revoked.
 - **`overdueCount` in dashboard uses `$ne: null`** — `{ $lt: now }` alone would match documents where `dueAt` is an old Date; the `$ne: null` guard is belt-and-suspenders to exclude documents where the field is explicitly null vs. missing.
+- **Case link routes use `$push` / `$pull` directly** — not `existing.save()`, because we're updating both sides of the link atomically. Using `findOne` + `.save()` on both would require two separate saves and risk partial failure.
+- **Link search dropdown uses `mousedown.prevent` not `click`** — the input's `blur` event fires before `click`, which would close the dropdown before the click registers. `mousedown.prevent` fires first and prevents the input losing focus.
+- **`overdueNotifiedAt` resets to null when `dueAt` changes** — if a due date is extended and then passes again, the escalation fires a second time. Without this reset, moving a due date forward would silently suppress all future escalation for that case.
+- **Overdue cron is wired in `index.ts`, not `app.ts`** — tests import `app.ts` directly and never run the cron. Any cron or scheduled job must live in `index.ts` to stay out of the test environment.
+- **`checkOverdueCases` receives the `io` instance as a parameter** — it cannot call `app.get('io')` because it has no access to the Express app. `index.ts` passes `io` directly when scheduling the cron.
+- **Notification type enum includes `'overdue'`** — added alongside `'assignment'`. Client notification UI renders `notification.message` for all types; no client changes are needed when adding new notification types as long as the message is self-explanatory.
 
 ---
 

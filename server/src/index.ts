@@ -2,7 +2,9 @@ import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+import cron from 'node-cron';
 import { createApp } from './app';
+import { checkOverdueCases } from './scripts/checkOverdue';
 import jwt from 'jsonwebtoken';
 
 dotenv.config();
@@ -55,6 +57,14 @@ mongoose.connect(process.env.MONGO_URI as string)
     .then(() => {
         console.log('MongoDB connected');
         httpServer.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+        // Daily overdue escalation — runs at 08:00 every day
+        cron.schedule('0 8 * * *', () => {
+            checkOverdueCases(io).catch(err =>
+                console.error('[overdue] Cron error:', err)
+            );
+        });
+        console.log('[overdue] Escalation cron scheduled at 08:00 daily');
     })
     .catch((err) => {
         console.error('MongoDB connection error:', err);

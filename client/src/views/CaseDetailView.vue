@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { getCase, updateCase, getActivities, addActivity, getCases, linkCase, unlinkCase, type Case, type Activity } from '../api/cases';
+import { getCase, updateCase, getActivities, addActivity, getCases, linkCase, unlinkCase, type Case, type Activity, type CasePriority, type CaseType } from '../api/cases';
 import { getUsers, type WorkspaceUser } from '../api/users';
 import { useAuthStore } from '../stores/auth';
 import { getSocket } from '../api/socket';
@@ -32,6 +32,8 @@ const noteError = ref('');
 const editing = ref(false);
 const editTitle = ref('');
 const editDescription = ref('');
+const editPriority = ref<CasePriority>('medium');
+const editType = ref<CaseType>('other');
 const editAddress = ref('');
 const editLat = ref(0);
 const editLng = ref(0);
@@ -43,6 +45,8 @@ function startEdit() {
     if (!caseData.value) return;
     editTitle.value = caseData.value.title;
     editDescription.value = caseData.value.description;
+    editPriority.value = caseData.value.priority;
+    editType.value = caseData.value.type;
     editAddress.value = caseData.value.address ?? '';
     editLat.value = caseData.value.lat ?? 0;
     editLng.value = caseData.value.lng ?? 0;
@@ -72,6 +76,8 @@ async function saveEdit() {
         const res = await updateCase(id, {
             title: editTitle.value.trim(),
             description: editDescription.value.trim(),
+            priority: editPriority.value,
+            type: editType.value,
             address: editAddress.value,
             ...(editAddress.value && { lat: editLat.value, lng: editLng.value }),
             dueAt: editDueAt.value || null,
@@ -319,6 +325,35 @@ async function removeLink(linkedId: string) {
                                     class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm resize-none text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-300"
                                     placeholder="Description"
                                 />
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label class="block text-xs font-medium text-slate-500 mb-1">Priority</label>
+                                    <select
+                                        v-model="editPriority"
+                                        class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                    >
+                                        <option value="critical">Critical</option>
+                                        <option value="high">High</option>
+                                        <option value="medium">Medium</option>
+                                        <option value="low">Low</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-slate-500 mb-1">Type</label>
+                                    <select
+                                        v-model="editType"
+                                        class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                    >
+                                        <option value="fire">Fire</option>
+                                        <option value="medical">Medical</option>
+                                        <option value="welfare_check">Welfare Check</option>
+                                        <option value="missing_person">Missing Person</option>
+                                        <option value="hazmat">Hazmat</option>
+                                        <option value="rescue">Rescue</option>
+                                        <option value="other">Other</option>
+                                    </select>
+                                </div>
                             </div>
                             <div>
                                 <label class="block text-xs font-medium text-slate-500 mb-1">
