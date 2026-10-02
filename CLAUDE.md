@@ -38,6 +38,7 @@ Caselink is a case management platform for emergency services / social work team
 | Case reassignment | Done | Admin only; activity logged |
 | Case linking | Done | Bidirectional related-case associations; searchable from detail view; activity-logged on both sides |
 | Overdue escalation notifications | Done | Daily 08:00 cron notifies assignee + all admins when dueAt passes; fires once per case; resets if due date changes |
+| Email — invite delivery | Done | Resend sends invite email on creation; `emailSent` flag in response; copy-link fallback always shown |
 | Advanced case filtering | Done | Type + assignee dropdowns in CaseListView; compose with search and tab filters; assignee filter admin-only |
 | Dashboard date range | Done | 7d/30d/90d preset selector; controls trend chart period and closed-in-period count |
 | Case history / SLA view | Done | Status timeline with durations in CaseDetailView; SLA badge (Met/Missed/On Track/Overdue) when due date set |
@@ -58,7 +59,7 @@ Caselink is a case management platform for emergency services / social work team
 | Feature | Priority | Notes |
 |---|---|---|
 | User deactivation | Done | Admin toggle in team view; `requireAuth` checks DB on every request; login blocked with clear message |
-| Email sending | Low | Invite links are copy-paste for now; Resend/Nodemailer when needed |
+| Email sending | Done | Invite emails sent via Resend; see Email section |
 | Notifications | Done | Bell icon in nav bar; assignment notifications persisted in DB + delivered via Socket.IO |
 | File attachments on cases | Low | Evidence photos, documents |
 | Mobile app | Future | API is REST + bearer token, ready for React Native |
@@ -578,6 +579,24 @@ Client (`CaseDetailView`): Related Cases card sits between the metadata grid and
 
 `PATCH /cases/:id` now accepts `priority` and `type` with the same validation as case creation. Changes are activity-logged as type `update` with the old and new values: `"Priority changed from high to critical"`, `"Type changed from fire to rescue"` (underscores replaced with spaces for readability). `startEdit()` in CaseDetailView populates `editPriority` and `editType` refs; `saveEdit()` always sends both fields so they're never accidentally cleared.
 
+### Email — invite delivery
+
+**Provider**: Resend (`npm install resend` in `server/`). Utility at `server/src/utils/email.ts`.
+
+**Env vars** (both required for email to send):
+```
+RESEND_API_KEY=re_...
+RESEND_FROM=onboarding@resend.dev   # or noreply@yourdomain.com if domain verified
+```
+
+**`sendInviteEmail(to, inviteUrl, workspaceName)`** — returns `true` on success, `false` on failure or missing key. Never throws — errors are caught and logged so a failed send never breaks the invite creation.
+
+**Trigger**: `POST /api/v1/invites` fetches the workspace name, calls `sendInviteEmail`, and returns `{ inviteUrl, emailSent: boolean }`. The invite is always created regardless of email outcome.
+
+**Client**: `TeamManageView` shows a green "Invite email sent to X" banner when `emailSent` is true. The copy-link input is always shown as a fallback.
+
+**Graceful degradation**: if `RESEND_API_KEY` is not set, `sendInviteEmail` returns `false` immediately without constructing the client. The route still succeeds and `emailSent: false` tells the client to skip the banner.
+
 ### Overdue escalation notifications
 
 **Model fields on Case**: `overdueNotifiedAt: Date | null` — null means not yet notified; set to `now` after escalation fires. Prevents duplicate notifications without querying the Notification collection.
@@ -642,6 +661,7 @@ The REST API is intentionally structured for reuse by a future React Native clie
 - **Overdue cron is wired in `index.ts`, not `app.ts`** — tests import `app.ts` directly and never run the cron. Any cron or scheduled job must live in `index.ts` to stay out of the test environment.
 - **`checkOverdueCases` receives the `io` instance as a parameter** — it cannot call `app.get('io')` because it has no access to the Express app. `index.ts` passes `io` directly when scheduling the cron.
 - **Notification type enum includes `'overdue'`** — added alongside `'assignment'`. Client notification UI renders `notification.message` for all types; no client changes are needed when adding new notification types as long as the message is self-explanatory.
+- **Resend client must be instantiated lazily** — `new Resend(key)` throws if the key is `undefined`. Since `dotenv.config()` runs in `index.ts` at startup, any module-level `new Resend(process.env.RESEND_API_KEY)` will crash on import before the env is loaded. Always construct the client inside the function after checking the key exists.
 - **`closedThisMonth` renamed to `closedInPeriod`** — both the server response field and the `DashboardStats` interface use `closedInPeriod`. Any code referencing the old name will fail silently (TypeScript will catch it at build time).
 - **Dashboard `days` param is whitelist-validated** — only `[7, 30, 90]` are accepted; any other value (including 14, 60, etc.) silently falls back to 7. Do not add intermediate values without updating the whitelist.
 - **`statusHistory` uses loaded activities only** — if `activitiesHasMore` is true, early status changes are not loaded and the timeline is incomplete. The view shows a warning in that case. To get the full history, load older activities first.

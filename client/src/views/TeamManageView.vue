@@ -31,11 +31,13 @@ const inviteEmail = ref('');
 const inviteError = ref('');
 const inviting = ref(false);
 const generatedLink = ref('');
+const emailSent = ref(false);
 
 function openModal() {
     inviteEmail.value = '';
     inviteError.value = '';
     generatedLink.value = '';
+    emailSent.value = false;
     showModal.value = true;
 }
 
@@ -49,6 +51,7 @@ async function submitInvite() {
     try {
         const res = await createInvite(inviteEmail.value.trim());
         generatedLink.value = res.data.inviteUrl;
+        emailSent.value = res.data.emailSent;
         await loadData();
     } catch (err: any) {
         inviteError.value = err.response?.data?.error || 'Failed to create invite';
@@ -243,7 +246,17 @@ const roleStyles: Record<string, string> = {
             </template>
 
             <template v-else>
-                <p class="text-sm text-slate-600">Share this link with the caseworker. It expires in 7 days.</p>
+                <!-- Email sent confirmation -->
+                <div v-if="emailSent" class="flex items-start gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+                    <svg class="w-4 h-4 text-green-600 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                    </svg>
+                    <p class="text-sm text-green-700">Invite email sent to <strong>{{ inviteEmail }}</strong>.</p>
+                </div>
+                <p class="text-sm text-slate-600">
+                    {{ emailSent ? 'You can also copy the link as a backup.' : 'Share this link with the caseworker.' }}
+                    It expires in 7 days.
+                </p>
                 <div class="flex items-center gap-2">
                     <input
                         :value="generatedLink"

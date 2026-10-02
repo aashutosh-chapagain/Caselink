@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import crypto from 'crypto';
 import Invite from '../models/Invite';
+import Workspace from '../models/Workspace';
 import { requireAuth, requireAdmin, type AuthedRequest } from '../middleware/auth';
+import { sendInviteEmail } from '../utils/email';
 
 const router = Router();
 
@@ -28,7 +30,10 @@ router.post('/', async (req, res) => {
 
     const inviteUrl = `${process.env.CLIENT_URL ?? 'http://localhost:5173'}/accept-invite?token=${token}`;
 
-    res.status(201).json({ inviteUrl });
+    const workspace = await Workspace.findById(authedReq.workspaceId).select('name');
+    const emailSent = await sendInviteEmail(email.toLowerCase(), inviteUrl, workspace?.name ?? 'your workspace');
+
+    res.status(201).json({ inviteUrl, emailSent });
 });
 
 // GET /invites — list pending (unused, not expired) invites for this workspace
