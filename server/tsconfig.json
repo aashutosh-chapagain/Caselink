@@ -10,7 +10,7 @@
     "module": "commonjs",
     "target": "esnext",
     "esModuleInterop": true,
-    "types": [],
+    "types": ["node", "vitest/globals"],
     // For nodejs:
     // "lib": ["esnext"],
     // "types": ["node"],

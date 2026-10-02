@@ -18,8 +18,9 @@ export interface DashboardStats {
     open: number;
     inProgress: number;
     criticalOpen: number;
-    closedThisMonth: number;
+    closedInPeriod: number;
     unassigned: number;
+    overdueCount: number;
     byPriority: {
         critical: number;
         high: number;
@@ -48,8 +49,8 @@ export interface DashboardActivity {
     createdAt: string;
 }
 
-export function getDashboardStats() {
-    return client.get<DashboardStats>('/dashboard/stats');
+export function getDashboardStats(days?: number) {
+    return client.get<DashboardStats>('/dashboard/stats', { params: days ? { days } : undefined });
 }
 
 export function getDashboardActivity() {

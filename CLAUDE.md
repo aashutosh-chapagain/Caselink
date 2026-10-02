@@ -23,13 +23,25 @@ Caselink is a case management platform for emergency services / social work team
 | Team management | Done | Member list, invite modal, pending invites, revoke |
 | Profile page | Done | View account details, edit name, change password |
 | Case CRUD | Done | Create, read, update; soft-closed via status |
-| Case list — filter tabs | Done | All / Open / In Progress / Closed (paginated) |
+| Case list — filter tabs | Done | All / Open / In Progress / Overdue / Closed (paginated) |
+| Case search | Done | Keyword search across title, description, region, address; composes with tab filters |
 | Case list — map tab | Done | Active cases with coords, priority-coloured pins |
 | Case detail | Done | Header, status buttons, edit mode, activity timeline |
 | Case activity timeline | Done | Notes, status changes, reassignments, field edits |
-| Case auto-activity logging | Done | Title and address changes create audit entries |
+| Case auto-activity logging | Done | Title, address, and due date changes create audit entries |
+| Case due dates | Done | Optional `dueAt` field; colour-coded badge in list; Overdue tab; overdue count on dashboard |
+| CSV export | Done | Export button on case list; respects current tab + search; server-side generation |
+| Case create page | Done | Dedicated `/cases/new` page replacing the modal; full-width LocationPicker |
+| Bulk status update | Done | Checkbox select on case list + floating action bar; server-enforced role scoping |
 | Case priority ordering | Done | Critical → High → Medium → Low, then by updatedAt |
+| Case priority/type editing | Done | Both editable after creation via PATCH; activity-logged with old+new values |
 | Case reassignment | Done | Admin only; activity logged |
+| Case linking | Done | Bidirectional related-case associations; searchable from detail view; activity-logged on both sides |
+| Overdue escalation notifications | Done | Daily 08:00 cron notifies assignee + all admins when dueAt passes; fires once per case; resets if due date changes |
+| Email — invite delivery | Done | Resend sends invite email on creation; `emailSent` flag in response; copy-link fallback always shown |
+| Advanced case filtering | Done | Type + assignee dropdowns in CaseListView; compose with search and tab filters; assignee filter admin-only |
+| Dashboard date range | Done | 7d/30d/90d preset selector; controls trend chart period and closed-in-period count |
+| Case history / SLA view | Done | Status timeline with durations in CaseDetailView; SLA badge (Met/Missed/On Track/Overdue) when due date set |
 | Alerts — admin management | Done | Create, toggle active/inactive, Socket.IO live |
 | Alerts — public page | Done | No auth, polls every 30s, workspace scoped |
 | Alerts — in-app banners | Done | Critical + High banners, per-alert dismissable |
@@ -46,20 +58,98 @@ Caselink is a case management platform for emergency services / social work team
 
 | Feature | Priority | Notes |
 |---|---|---|
-| User deactivation | Medium | `isActive` field exists on User model, middleware check not wired |
-| Email sending | Low | Invite links are copy-paste for now; Resend/Nodemailer when needed |
-| Notifications | Low | In-app or push notifications for case assignments |
+| User deactivation | Done | Admin toggle in team view; `requireAuth` checks DB on every request; login blocked with clear message |
+| Email sending | Done | Invite emails sent via Resend; see Email section |
+| Notifications | Done | Bell icon in nav bar; assignment notifications persisted in DB + delivered via Socket.IO |
 | File attachments on cases | Low | Evidence photos, documents |
 | Mobile app | Future | API is REST + bearer token, ready for React Native |
 
 ---
 
+## Test Infrastructure
+
+### Overview
+
+Tests run against an in-memory MongoDB instance (`mongodb-memory-server`) — the real Atlas database is never touched. `JWT_SECRET` is set directly in `setup.ts`; no `.env` file is required to run tests.
+
+### Files
+
+```
+server/
+  vitest.config.mts          # Vitest config — globals, node env, singleFork, 20s timeout
+  src/tests/
+    setup.ts                 # Starts in-memory MongoDB, mounts mock Socket.IO, wipes DB after each test
+    helpers.ts               # registerAdmin(), registerCaseworker(), createCase() — shared test utilities
+    auth.test.ts             # 14 tests — register, login, full invite flow
+    cases.test.ts            # 17 tests — CRUD, role enforcement, workspaceId isolation
+    users.test.ts            # 10 tests — profile, password change, workspace scoping
+```
+
+### Key decisions
+
+- **`app.ts` factory** — `createApp()` returns the Express app without connecting to MongoDB or starting a listener. Tests import `app.ts`; the real server imports it too from `index.ts`. This is the standard pattern for making Express apps testable.
+- **`singleFork: true`** — all three test files share one process and one in-memory MongoDB instance. Without this, Vitest would spin up three separate MongoDB instances (one per file), wasting RAM and time.
+- **`afterEach` wipe** — every collection is wiped after each test so no test can depend on another's side effects (test isolation).
+- **Mock Socket.IO** — routes call `req.app.get('io').to(...).emit(...)`. Tests set a no-op mock: `app.set('io', { to: () => ({ emit: () => {} }) })`. Without this, any route that emits a socket event would throw in tests.
+- **`vitest.config.mts`** — `.mts` extension marks the config file as ESM. The server package uses `"type": "commonjs"`, so without `.mts` Vite would try to load the config as CommonJS and warn about ESM syntax.
+- **`"types": ["node", "vitest/globals"]` in `tsconfig.json`** — makes `beforeAll`, `afterEach`, `describe`, `it`, `expect` etc. available as globals without explicit imports in test files.
+
+### What the tests cover
+
+Tests focus on **security invariants** (workspaceId isolation, role enforcement) and **validation boundaries** — not implementation details or response shapes.
+
+- `workspaceId isolation` — admin from Workspace A cannot see cases or users from Workspace B
+- `role enforcement` — caseworker gets 403 on admin-only operations (reassign, create invites)
+- `single-use invite` — replaying an accepted invite token returns 400
+- `auth validation` — short passwords, duplicate emails, wrong credentials all return correct status codes
+
+---
+
+## Git workflow and CI
+
+### Branch strategy
+
+- `dev` — active development branch; all feature work goes here
+- `main` — protected; only receives merges from `dev` via pull request
+
+### Pre-push hook (Husky)
+
+Installed at the git root. Running `npm install` at the repo root wires it up automatically via the `prepare` script.
+
+```
+git push  →  .husky/pre-push runs  →  cd server && npm test
+           →  push blocked if any test fails
+```
+
+The hook lives at `.husky/pre-push`. It provides fast local feedback before code leaves the machine.
+
+### GitHub Actions CI (`.github/workflows/ci.yml`)
+
+Triggers on every push to `dev` and every PR targeting `dev` or `main`. Runs two parallel jobs:
+
+| Job | Command | What it checks |
+|---|---|---|
+| `server-tests` | `npm test` in `server/` | All 41 Vitest tests pass |
+| `client-typecheck` | `npm run build` in `client/` | `vue-tsc` type-check + Vite build succeeds |
+
+Both jobs use `npm ci` (not `npm install`) for reproducible, lockfile-exact installs. npm cache is keyed per sub-package lockfile so a client dependency change doesn't invalidate the server cache.
+
+To enforce CI as a required gate on PRs: **Settings → Branches → Branch protection rule for `main`** → enable "Require status checks" → select `Server tests` and `Client type-check`.
+
+---
+
 ## Commands
+
+### Root (git root — `Caselink/`)
+```bash
+npm install      # Installs husky and wires up the pre-push hook
+```
 
 ### Server (`cd server`)
 ```bash
 npm run dev      # Start with tsx watch (hot-reload)
-npm run seed     # Wipe DB and insert demo workspace + users + cases
+npm run seed     # Wipe DB and insert demo workspace, 4 caseworkers, 26 cases, 41 activities, 4 alerts
+npm test         # Run all tests (vitest, in-memory MongoDB, no .env needed)
 ```
 
 ### Client (`cd client`)
@@ -68,8 +158,6 @@ npm run dev      # Vite dev server (hot-reload)
 npm run build    # Type-check then production build
 npm run preview  # Serve production build locally
 ```
-
-There are no test scripts configured in either package.
 
 ---
 
@@ -110,27 +198,32 @@ Every new query, route, or feature touching Case, Activity, Alert, or Invite **m
 
 ```
 server/src/
-  index.ts            # Express app setup, Socket.IO init, route registration
+  app.ts              # createApp() factory — Express app + all routes, no DB/server I/O (imported by tests and index.ts)
+  index.ts            # Server startup only — calls createApp(), connects MongoDB, starts Socket.IO + listener
   middleware/auth.ts  # requireAuth / requireAdmin middleware; extends Request with userId/workspaceId/role
   utils/jwt.ts        # signToken / verifyToken helpers (7-day expiry)
   models/
     User.ts           # name, email, passwordHash, role, workspaceId, isActive (default true)
     Workspace.ts      # name
-    Case.ts           # title, description, status, priority, type, region, address, lat, lng, assignedTo, createdBy, workspaceId
+    Case.ts           # title, description, status, priority, type, region, address, lat, lng, assignedTo, createdBy, workspaceId, dueAt, overdueNotifiedAt, linkedCaseIds
     Activity.ts       # caseId, authorId, note, type (note|status_change|assignment|update), workspaceId
     Alert.ts          # message, severity, region, lat, lng, isActive, createdBy, workspaceId
     Invite.ts         # email, workspaceId, token (UUID), expiresAt (7d), used, createdBy
+    Notification.ts   # userId, workspaceId, type (assignment|overdue), message, caseId, read; index on userId+createdAt
   routes/
     auth.ts           # POST /register (admin + new workspace), POST /login,
                       # GET /invite/:token (public, pre-fill), POST /accept-invite (public, create caseworker)
-    cases.ts          # CRUD under /api/v1/cases — emits case:created / case:updated via Socket.IO
+    cases.ts          # CRUD under /api/v1/cases — emits case:created / case:updated via Socket.IO;
+                      # POST/DELETE /:id/links for bidirectional case linking
     activities.ts     # GET/POST /api/v1/cases/:caseId/activities — emits activity:added
     users.ts          # GET /users (workspace list), GET /users/me, PATCH /users/me (name), PATCH /users/me/password
     invites.ts        # POST / GET / DELETE /api/v1/invites — admin only (requireAuth + requireAdmin at router level)
     dashboard.ts      # GET /stats, GET /activity — aggregated workspace data
     alerts.ts         # GET /public (no auth), GET / POST / PATCH — alert management
+    notifications.ts  # GET / (last 20 for user), PATCH /read (mark all read)
   scripts/
     seed.ts           # Demo data seeder (destructive — clears all collections)
+    checkOverdue.ts   # Overdue escalation logic — called by cron in index.ts; notifies assignee + admins, logs activity, sets overdueNotifiedAt
     socket-test-client.ts  # Manual Socket.IO test harness
 ```
 
@@ -158,15 +251,19 @@ client/src/
     alerts.ts         # fetches once (loaded flag); activeAlerts / urgentAlerts getters; connectSocket() idempotent; reset() on logout
   router/index.ts     # guestOnlyRoutes = ['login', 'register', 'accept-invite'] redirected to /dashboard if authenticated;
                       # requiresAuth and requiresAdmin meta guards
+  utils/
+    caseStyles.ts         # Shared style/label maps: priorityStyles, priorityLabel, statusStyles, statusLabel, typeLabel; dueBadge(), dueBadgeClass()
+    format.ts             # formatDate(), formatDateTime() — en-AU locale, always includes year
   views/
     LoginView.vue         # Login form + "Create a workspace" link to /register
     RegisterView.vue      # New workspace + admin account creation
     AcceptInviteView.vue  # Public; validates token on mount, pre-fills email; creates caseworker account
     TeamManageView.vue    # Admin-only: member list, invite modal (generates link), pending invites + revoke
     ProfileView.vue       # Account details (read-only) + inline name edit + change password form
-    CaseListView.vue      # Filter tabs (All/Open/In Progress/Closed/Map) + create modal + Socket.IO
+    CaseListView.vue      # Filter tabs (All/Open/In Progress/Overdue/Closed/Map) + Socket.IO; New Case navigates to /cases/new
+    CaseCreateView.vue    # Dedicated create page (/cases/new) — two-card layout; on success redirects to /cases/:id
     CaseDetailView.vue    # Case header, status buttons, activity timeline, edit mode, add note form
-    DashboardView.vue     # Stat cards, charts, stale cases, workload, activity feed, active alerts + map
+    DashboardView.vue     # Stat cards, charts; delegates sections to DashboardAlerts/StaleCasesTable/WorkloadTable/ActivityFeed
     AlertsManageView.vue  # Admin-only alert management: create/toggle alerts, active alerts map
     PublicAlertsView.vue  # Public page (no auth) — polls every 30s; reads workspaceId from ?workspace=
   components/
@@ -177,6 +274,10 @@ client/src/
     CasesMap.vue          # Thin wrapper over PinMap — maps Case[] → MapPin[] with priority colours; hover shows popup
     CaseMap.vue           # Single-pin Leaflet map for CaseDetailView
     StatCard.vue          # Summary stat card (label + number + colour)
+    DashboardAlerts.vue   # Active alerts list + map section; reads alertsStore directly; renders nothing when no active alerts
+    StaleCasesTable.vue   # Stale cases table; props: cases: StaleCase[]; navigates to case detail on row click
+    WorkloadTable.vue     # Caseworker workload table; props: workload: WorkloadRow[]
+    ActivityFeed.vue      # Recent activity feed; props: activity: DashboardActivity[]; navigates to case on click
     BreakdownBar.vue      # Labelled CSS progress bar (exists, not currently used)
 ```
 
@@ -198,9 +299,45 @@ client/src/
 
 **Logout** is entirely client-side — auth store cleared, localStorage wiped, redirect to `/`. JWTs remain cryptographically valid until 7-day expiry but client can't send them.
 
-**`isActive` on User model**: field exists (default `true`), but the middleware check is not yet wired. Add it to `requireAuth` when user deactivation is needed.
+**`isActive` on User model**: enforced in two places — `requireAuth` middleware (DB check on every request) and `POST /auth/login` (checked after password verification). Deactivation takes effect immediately without waiting for JWT expiry.
 
 ---
+
+### Notifications
+
+**Model**: `userId`, `workspaceId`, `type` (enum: `assignment`), `message`, `caseId`, `read` (default false). Indexed on `{ userId: 1, createdAt: -1 }` to match the fetch query exactly.
+
+**Trigger**: `PATCH /cases/:id` creates a notification when `assignedTo` changes to a user other than the requester. A `notifyAssignee` flag is set before `existing.assignedTo` is mutated — after mutation the old value is gone. Self-assignments are excluded (`assignedTo !== req.userId`).
+
+**Routes**:
+- `GET /api/v1/notifications` — last 20 for current user, newest first, scoped by `userId`
+- `PATCH /api/v1/notifications/read` — `updateMany` marks all unread as read in one DB operation
+
+**Socket**: emits `notification:new` to `user:<userId>` room (personal room, not workspace room) so only the recipient receives it.
+
+**Pinia store** (`stores/notifications.ts`):
+- `loaded` flag — fetches once per session, not on every navigation
+- `_registeredSocket` module-level guard — same idempotent pattern as `alertsStore`
+- `markAllRead()` updates local state immediately without re-fetching
+- `reset()` clears the guard so re-login reconnects the socket listener
+
+**App.vue integration**: `notificationsStore.fetch()` and `notificationsStore.connectSocket()` called in the token watcher alongside alerts. `notificationsStore.reset()` called on logout. Outside-click closes the dropdown via a document-level click listener + `@click.stop` on the bell wrapper.
+
+**Bell badge**: hidden entirely (`v-if`) when count is 0; capped at `9+` for counts over 9. Opening the dropdown immediately fires `markAllRead()` if there are unread notifications — no extra click required.
+
+### User deactivation
+
+`PATCH /api/v1/users/:id/active` — admin only; toggles `isActive` on the target user. Server decides the new value (`!user.isActive`) — client sends no body. Two guards:
+- Cannot deactivate yourself (`req.params.id === req.userId` → 400)
+- Must be in the same workspace (`findOne` includes `workspaceId` filter → 404 if not found)
+
+`requireAuth` middleware hits MongoDB on every authenticated request to check `isActive`. Deactivation takes effect immediately — no need to wait for the JWT to expire. Query uses `.select('isActive')` to fetch only the one field needed.
+
+`POST /auth/login` also checks `isActive` **after** password verification. The check is ordered this way intentionally: checking before password verification would let an attacker probe whether a given email is deactivated without knowing the password.
+
+`GET /api/v1/users` includes `isActive` in the select so the team management UI can show Active/Inactive badges and the deactivate/reactivate button correctly.
+
+Client: `TeamManageView` shows all members (active + inactive). Inactive rows are dimmed with `opacity-50`. The toggle button is hidden for your own row (`m._id !== authStore.user?.id`) since self-deactivation is blocked server-side anyway.
 
 ### Profile page
 
@@ -218,6 +355,26 @@ The profile page uses the `PasswordInput` component for both password fields. Na
 - **`type`** — `fire | medical | welfare_check | missing_person | hazmat | rescue | other` (required).
 - **`address`** — optional free-text string from Nominatim. Only stored when user picks from LocationPicker.
 - **`lat` / `lng`** — optional coordinates, always present if `address` is present.
+- **`dueAt`** — optional `Date`, default `null`. Set via date input on create or edit. Cleared by sending `dueAt: null` on PATCH.
+
+### Case due dates
+
+**Model**: `dueAt: { type: Date, default: null }` on the Case schema.
+
+**Routes**:
+- `POST /cases` — accepts `dueAt` ISO string; validated with `isNaN(new Date(dueAt).getTime())`.
+- `PATCH /cases/:id` — accepts `dueAt` ISO string or `null` (to clear); logs activity when changed.
+
+**Activity logging**: due date changes log `"Due date set to DD MMM YYYY"` or `"Due date removed"` (type: `update`). The comparison uses `.getTime()` to avoid string/Date mismatch.
+
+**Dashboard**: `overdueCount` added to `/dashboard/stats` — active cases (`open | in_progress`) where `dueAt < now`. Shown as a stat card that turns red when > 0.
+
+**CaseListView**:
+- **Overdue tab** — client-side filter on `activeCases` where `dueAt < now`. No extra server request.
+- **Due badge** — shown below the case title in the list. Colour logic: overdue=red, due today=orange, due ≤3d=yellow, future=slate. Badge is a pure function `dueBadge(dueAt)` called per row.
+- **Due column** — replaces the old Created column in the table header.
+
+**CaseDetailView**: due date shown in the metadata grid with colour coding; editable via `<input type="date">` in edit mode. Clearing the field sends `dueAt: null` to the server.
 
 ### Case activity auto-logging
 
@@ -226,11 +383,24 @@ The PATCH `/cases/:id` handler creates Activity entries automatically for:
 - **Reassignment** — `"Case reassigned"` (type: `assignment`)
 - **Title change** — `"Title changed from "X" to "Y""` (type: `update`)
 - **Address change** — `"Address updated to "..."` or `"Address removed"` (type: `update`)
+- **Due date change** — `"Due date set to DD MMM YYYY"` or `"Due date removed"` (type: `update`)
 - **Description change** — saved silently, no activity log (too noisy)
 
 Activity `type` enum: `note | status_change | assignment | update`. Client `Activity` interface in `cases.ts` must stay in sync with this.
 
 Activity badge colours in CaseDetailView: note=slate, status_change=blue, assignment=purple, update=amber.
+
+### CSV export
+
+`GET /api/v1/cases/export` — server-side CSV generation. **Must be registered before `GET /:id`** or Express matches the literal string "export" as a case ID.
+
+Accepts: `status` (comma-separated), `search`, `overdue=true`. Applies the same workspace + role scoping as the list route. No pagination — returns all matching rows.
+
+Uses `.find().lean()` (not aggregation) for simplicity. `lean()` returns plain objects, avoiding Mongoose overhead for a read-only export. Fields: ID, Title, Type, Priority, Status, Region, Assigned To, Created By, Due Date, Address, Created.
+
+CSV escaping: fields containing commas, quotes, or newlines are wrapped in double-quotes with internal quotes doubled (`"` → `""`). Plain `String(val)` handles ObjectId and Date coercion.
+
+Client: `exportCases()` in `api/cases.ts` uses `responseType: 'blob'`. `downloadCsv()` in `CaseListView` creates a temporary object URL, programmatically clicks an `<a>` element, then revokes the URL. The button passes the current active tab and search query so the export matches what the user sees.
 
 ### Address autocomplete / LocationPicker
 
@@ -265,6 +435,18 @@ Activity badge colours in CaseDetailView: note=slate, status_change=blue, assign
 - Pin count and priority legend shown in card header/footer
 - Cases without coordinates are excluded silently (only appear in list tabs)
 
+### Case search
+
+`GET /cases?search=<query>` — composes with all existing filters (`status`, role scoping, `workspaceId`). The `search` param adds a `$or` regex match across `title`, `description`, `region`, and `address` fields. User input is regex-escaped before use to prevent unexpected behaviour.
+
+Client behaviour in `CaseListView`:
+- Search input sits above the filter tabs and affects all tabs simultaneously
+- 300ms debounce — request fires only after the user stops typing
+- When `searchQuery` is non-empty, results are fetched directly from the server (bypassing the Pinia store) and stored in a local `searchResults` ref; tab filtering is then applied client-side on those results
+- When `searchQuery` is cleared, the view reverts to the normal store-backed display
+- "Load more" (closed tab pagination) is hidden while searching
+- Map tab shows mappable cases from `searchResults` when searching
+
 ### Case list ordering
 
 `GET /cases` uses a MongoDB aggregation pipeline:
@@ -286,27 +468,92 @@ Activity badge colours in CaseDetailView: note=slate, status_change=blue, assign
 - Activities paginated: "Load older activity" button prepends via `before` cursor (oldest visible `_id`)
 - Socket.IO `case:updated` patches header live; `activity:added` appends to timeline
 - Both socket listeners filter by case ID to avoid cross-case pollution
+- Case History card sits between Related Cases and Activity; see below
+
+### Case history / SLA view
+
+Client-only card in `CaseDetailView`. No extra server requests — processes already-loaded activities.
+
+**`statusHistory` computed**: filters activities to `type === 'status_change'`, sorts chronologically, and reconstructs status segments:
+1. Always starts with `open` at `caseData.createdAt`
+2. Each status_change note is parsed with `/Status changed from (.+) to (.+)/`
+3. Each segment records `{ status, from, to, durationMs }`
+4. Final segment: `to = null` (ongoing) if not closed; `to = updatedAt` if closed
+
+**`formatDuration(ms)`**: formats epoch-ms duration as `Xd Yh`, `Xh Ym`, or `Xm`.
+
+**`slaStatus` computed**: `null` if no `dueAt`. Compares `updatedAt` (closed) or `now` (open/in_progress) against `dueAt`:
+- `'met'` — closed on or before due date
+- `'missed'` — closed after due date
+- `'on_track'` — active, due date in the future
+- `'overdue'` — active, past due date
+
+**Incomplete history warning**: if `activitiesHasMore` is true, a note is shown — the earliest status changes may not be loaded.
+
+### Bulk status update
+
+`PATCH /api/v1/cases/bulk` — **must come before `PATCH /:id`** or "bulk" is treated as a case ID. Accepts `{ ids: string[], status: string }`. Max 100 IDs per request.
+
+Server applies the same workspace + role scoping as the list route: caseworkers can only update cases where `assignedTo === userId`. Cases already at the target status are silently skipped (filtered with `status: { $ne: status }` in the query). An activity entry (`status_change`) is logged and `case:updated` emitted for each actually-changed case.
+
+Client:
+- `selectedIds: Set<string>` — Set chosen over array for O(1) `.has()` in the template. Mutated by creating a new Set (Vue reactivity requires reference change to trigger updates).
+- Select-all checkbox uses the HTML `indeterminate` property (set via `:ref` callback) to show a dash when some-but-not-all rows are selected.
+- `@click.stop` on the checkbox cell prevents row click (navigate to case detail) from firing when the checkbox is clicked.
+- Selection is cleared on tab switch (watched via `selectTab`).
+- Floating action bar uses `<Transition>` for slide-up animation; `whitespace-nowrap` prevents wrapping on narrow screens.
+- After bulk update, the list updates automatically via Socket.IO `case:updated` events — no manual refetch needed.
 
 ### CaseListView behaviour
 
 - All/Open/In Progress tabs filter `activeCases` client-side (no extra requests)
+- Overdue tab: client-side filter on `activeCases` where `dueAt < now` — no server request
 - Closed tab: paginated, triggers fetch on first visit, "Load more" appends
 - Map tab: `CasesMap` over `mappableCases` (active cases with coordinates)
 - Socket.IO `case:created` / `case:updated` keep all tabs live
+- Bulk select: checkboxes on every list row; action bar floats at bottom when any selected
+- Advanced filters: type dropdown (all roles) + assignee dropdown (admin only, above tab bar); compose with search and tab filters; `mappableCases` also respects them
+
+### Advanced case filtering
+
+Two filter dropdowns sit above the tab bar in `CaseListView`, between the search input and the tabs.
+
+**Type filter** — all 7 case types; applies to all tabs including map. No server request — pure client-side filter on the computed case list.
+
+**Assignee filter** — admin-only; `getUsers()` is called once on mount and stored in a local `users` ref. Filters by `assignedTo?._id`. Not shown for caseworkers.
+
+Both `filterType` and `filterAssignee` are applied at the end of `displayedCases` and `mappableCases` computed properties, after tab/search filtering, so they compose naturally. A "Clear filters" button appears when any filter is active.
+
+**CSV export does not respect these filters** — the export button passes only the active tab and search query to the server. Type/assignee filtering would require server-side query params on the export route.
 
 ### Dashboard
 
-`GET /api/v1/dashboard/stats` — all aggregated data in one round trip:
+`GET /api/v1/dashboard/stats?days=7|30|90` — all aggregated data in one round trip:
 - Counts by status, priority, type
 - Per-assignee workload (open/inProgress split)
-- Closed-this-month count
+- `closedInPeriod` — cases closed within the selected period
 - Unassigned active cases (admin only)
-- Stale cases: no activity in 7+ days (up to 5)
-- 7-day creation trend (missing days filled with 0 server-side)
+- Overdue cases: active cases where `dueAt < now`
+- Stale cases: no activity in last 7 days, regardless of `days` param (always fixed 7d threshold)
+- Trend: `days` data points, one per day, missing days filled with 0 server-side
 
 `GET /api/v1/dashboard/activity` — last 10 activities, workspace-wide (admin) or own cases (caseworker).
 
 Charts use `computed(): ApexOptions` — the explicit return type is required or TypeScript widens `'donut'` to `string`, failing ApexCharts' type check.
+
+### Dashboard date range
+
+`GET /dashboard/stats` accepts a `days` query param (7, 30, or 90). Any other value defaults to 7. Whitelist-validated with `[7, 30, 90].includes(rawDays)`.
+
+The `days` param affects:
+- `closedInPeriod` count — cases closed within `days` days (replaces the old calendar-month `closedThisMonth`)
+- Trend chart length — fills exactly `days` data points; x-axis `tickAmount: 7` when `days > 14` to avoid label crowding
+
+The `days` param does **not** affect:
+- Stale case detection — always uses a fixed 7-day `sevenDaysAgo` threshold
+- Overdue count — always `dueAt < now` regardless
+
+Client: `DashboardView` has `selectedDays = ref(7)` and a `watch(selectedDays, fetchData)`. `fetchData()` passes `selectedDays.value` to `getDashboardStats()` and re-fetches both stats and activity. A segmented control (7d / 30d / 90d) is in the dashboard header. The `closedLabel` computed returns the appropriate label for the stat card.
 
 ### Alerts
 
@@ -317,6 +564,50 @@ Charts use `computed(): ApexOptions` — the explicit return type is required or
 **Pinia store**: `loaded` flag prevents double-fetch; `connectSocket()` idempotent via module-level `_registeredSocket` guard; `reset()` on logout.
 
 **Banners**: critical + high alerts render below nav bar; per-alert dismiss is session-local.
+
+### Case linking
+
+`POST /api/v1/cases/:id/links` — body `{ caseId }`. Validates both cases exist in the same workspace, rejects self-links and duplicates. Updates `linkedCaseIds` on both documents with `$push` (bidirectional). Logs `"Linked to case: [title]"` activity on each. Emits `case:updated` on both.
+
+`DELETE /api/v1/cases/:id/links/:linkedId` — removes the link from both sides with `$pull`. Logs `"Removed link to case: [title]"` activity on each. Emits `case:updated` on both.
+
+`GET /cases/:id` populates `linkedCaseIds` with `title, status, priority, type, region` — enough to render the Related Cases card without a second request.
+
+Client (`CaseDetailView`): Related Cases card sits between the metadata grid and the activity timeline. Lists linked cases with priority + status badges; × removes a link. Inline search (debounced 300ms, reuses `getCases({ search })`) shows a dropdown of candidates filtered to exclude the current case and already-linked cases. `mousedown.prevent` on dropdown options prevents blur from closing the dropdown before the click registers.
+
+### Case priority and type editing
+
+`PATCH /cases/:id` now accepts `priority` and `type` with the same validation as case creation. Changes are activity-logged as type `update` with the old and new values: `"Priority changed from high to critical"`, `"Type changed from fire to rescue"` (underscores replaced with spaces for readability). `startEdit()` in CaseDetailView populates `editPriority` and `editType` refs; `saveEdit()` always sends both fields so they're never accidentally cleared.
+
+### Email — invite delivery
+
+**Provider**: Resend (`npm install resend` in `server/`). Utility at `server/src/utils/email.ts`.
+
+**Env vars** (both required for email to send):
+```
+RESEND_API_KEY=re_...
+RESEND_FROM=onboarding@resend.dev   # or noreply@yourdomain.com if domain verified
+```
+
+**`sendInviteEmail(to, inviteUrl, workspaceName)`** — returns `true` on success, `false` on failure or missing key. Never throws — errors are caught and logged so a failed send never breaks the invite creation.
+
+**Trigger**: `POST /api/v1/invites` fetches the workspace name, calls `sendInviteEmail`, and returns `{ inviteUrl, emailSent: boolean }`. The invite is always created regardless of email outcome.
+
+**Client**: `TeamManageView` shows a green "Invite email sent to X" banner when `emailSent` is true. The copy-link input is always shown as a fallback.
+
+**Graceful degradation**: if `RESEND_API_KEY` is not set, `sendInviteEmail` returns `false` immediately without constructing the client. The route still succeeds and `emailSent: false` tells the client to skip the banner.
+
+### Overdue escalation notifications
+
+**Model fields on Case**: `overdueNotifiedAt: Date | null` — null means not yet notified; set to `now` after escalation fires. Prevents duplicate notifications without querying the Notification collection.
+
+**Cron** (`scripts/checkOverdue.ts`): called from `index.ts` via `node-cron` at `'0 8 * * *'` (08:00 daily). Query: `{ status: { $in: ['open', 'in_progress'] }, dueAt: { $lt: now, $ne: null }, overdueNotifiedAt: null }`. For each matching case: creates one Notification per recipient (assignee + all active workspace admins), emits `notification:new` to each personal Socket.IO room, logs `"Case escalated — past due date"` activity (type: `update`), then sets `overdueNotifiedAt = now`.
+
+**Reset**: `PATCH /cases/:id` resets `overdueNotifiedAt` to `null` when `dueAt` changes — so if a due date is extended and then passes again, the escalation fires a second time.
+
+**Notification type**: `'overdue'` added to Notification model enum alongside `'assignment'`. Client notification bell renders `notification.message` regardless of type — no client changes needed.
+
+**Cron is wired in `index.ts` only** — not in `app.ts` — so tests never trigger it.
 
 ---
 
@@ -350,6 +641,32 @@ The REST API is intentionally structured for reuse by a future React Native clie
 - **`authStore.updateUser(fields)` must be called after any server-side profile update** — the JWT does not carry the user's name, so the store is the source of truth for what the nav bar shows. Forgetting this means the nav bar shows the old name until next login.
 - **`POST /auth/register` creates workspace + admin only** — it no longer joins existing workspaces. Caseworkers join via the invite flow exclusively.
 - **Invite token is a UUID stored in DB** — not a JWT. This allows revocation via `DELETE /invites/:id`. A JWT-based token could not be revoked without a blacklist.
+- **`findOneAndUpdate` / `findByIdAndUpdate` use `returnDocument: 'after'`** — Mongoose 9 deprecated `{ new: true }`; use `{ returnDocument: 'after' }` instead. Both options return the updated document, but `new: true` logs a deprecation warning.
+- **`requireAuth` now makes a DB call on every request** — added when user deactivation was wired. Uses `.select('isActive')` to keep it minimal. If performance becomes a concern at scale, add a Redis cache keyed by `userId` with a short TTL.
+- **Notification flag must be captured before mutating `existing.assignedTo`** — the `notifyAssignee` boolean is set inside the `if (assignedTo !== existing.assignedTo)` block, before `existing.assignedTo = assignedTo` runs. After mutation the old value is gone and you can no longer detect that a change occurred.
+- **`notification:new` emits to `user:<id>` not `workspace:<id>`** — notifications are personal. Broadcasting to the workspace room would send every user's notifications to all other members.
+- **Login checks `isActive` after password verification, not before** — checking before would let an attacker learn that an account exists (and is deactivated) without knowing the password. Always verify credentials first, then reveal account state.
+- **`process.env.JWT_SECRET` is not loaded in tests** — `dotenv.config()` only runs in `index.ts`, which tests never import. `setup.ts` sets `process.env.JWT_SECRET = 'test-secret'` directly. Any new env variable used in routes must be set in `setup.ts` if tests call those routes.
+- **Due date comparison uses `.getTime()`, not string comparison** — `existing.dueAt` is a Mongoose `Date` object; comparing it to a string would always be unequal. Always convert both sides to epoch ms before comparing.
+- **Clearing `dueAt` requires sending `dueAt: null` explicitly** — omitting the field from the PATCH body leaves the existing value unchanged (the `if (dueAt !== undefined)` guard). Client must send `dueAt: null` to remove the due date.
+- **`PATCH /cases/bulk` must come before `PATCH /:id`** — "bulk" would be treated as a case ID otherwise. Same ordering rule applies to all literal-path routes under a parameterised segment.
+- **`/cases/new` route must come before `/cases/:id`** — same reason as the export route; Vue Router matches in registration order and would treat "new" as a case ID otherwise.
+- **LocationPicker `region` always overwrites the form field in `CaseCreateView`** — picking a location is an explicit user action so it always wins. The old modal used a guard (`!form.region`) to avoid clobbering manual input on first auto-fill; that guard was removed in the dedicated page.
+- **`GET /cases/export` must come before `GET /:id`** — Express matches routes in registration order; "export" would be treated as a case ID otherwise. Always place specific literal paths before parameterised ones.
+- **CSV export uses `responseType: 'blob'` on the client** — without this, Axios parses the response as text/JSON and the download corrupts. The blob is turned into an object URL and clicked programmatically, then immediately revoked.
+- **`overdueCount` in dashboard uses `$ne: null`** — `{ $lt: now }` alone would match documents where `dueAt` is an old Date; the `$ne: null` guard is belt-and-suspenders to exclude documents where the field is explicitly null vs. missing.
+- **Case link routes use `$push` / `$pull` directly** — not `existing.save()`, because we're updating both sides of the link atomically. Using `findOne` + `.save()` on both would require two separate saves and risk partial failure.
+- **Link search dropdown uses `mousedown.prevent` not `click`** — the input's `blur` event fires before `click`, which would close the dropdown before the click registers. `mousedown.prevent` fires first and prevents the input losing focus.
+- **`overdueNotifiedAt` resets to null when `dueAt` changes** — if a due date is extended and then passes again, the escalation fires a second time. Without this reset, moving a due date forward would silently suppress all future escalation for that case.
+- **Overdue cron is wired in `index.ts`, not `app.ts`** — tests import `app.ts` directly and never run the cron. Any cron or scheduled job must live in `index.ts` to stay out of the test environment.
+- **`checkOverdueCases` receives the `io` instance as a parameter** — it cannot call `app.get('io')` because it has no access to the Express app. `index.ts` passes `io` directly when scheduling the cron.
+- **Notification type enum includes `'overdue'`** — added alongside `'assignment'`. Client notification UI renders `notification.message` for all types; no client changes are needed when adding new notification types as long as the message is self-explanatory.
+- **Resend client must be instantiated lazily** — `new Resend(key)` throws if the key is `undefined`. Since `dotenv.config()` runs in `index.ts` at startup, any module-level `new Resend(process.env.RESEND_API_KEY)` will crash on import before the env is loaded. Always construct the client inside the function after checking the key exists.
+- **`closedThisMonth` renamed to `closedInPeriod`** — both the server response field and the `DashboardStats` interface use `closedInPeriod`. Any code referencing the old name will fail silently (TypeScript will catch it at build time).
+- **Dashboard `days` param is whitelist-validated** — only `[7, 30, 90]` are accepted; any other value (including 14, 60, etc.) silently falls back to 7. Do not add intermediate values without updating the whitelist.
+- **`statusHistory` uses loaded activities only** — if `activitiesHasMore` is true, early status changes are not loaded and the timeline is incomplete. The view shows a warning in that case. To get the full history, load older activities first.
+- **`filterType` / `filterAssignee` are client-side only** — applied in `displayedCases` and `mappableCases` computed properties, after server fetch. The CSV export route does not receive them and exports all matching rows ignoring these filters.
+- **Assignee filter users are fetched only for admins** — `getUsers()` is called on mount in `CaseListView` only when `authStore.isAdmin`. The `users` ref stays empty for caseworkers, and the assignee dropdown is hidden entirely via `v-if="authStore.isAdmin"`.
 
 ---
 
@@ -357,8 +674,13 @@ The REST API is intentionally structured for reuse by a future React Native clie
 
 After running `npm run seed` in `server/`:
 
-| Role        | Email                       | Password    |
-|-------------|-----------------------------|-------------|
-| admin       | admin@caselink.test         | password123 |
-| caseworker  | caseworker@caselink.test    | password123 |
-| Workspace   | DFES Perth Metro            | —           |
+| Role        | Email                       | Password    | Name           |
+|-------------|-----------------------------|-------------|----------------|
+| admin       | admin@caselink.test         | password123 | Ash Reynolds   |
+| caseworker  | sarah@caselink.test         | password123 | Sarah Chen     |
+| caseworker  | marcus@caselink.test        | password123 | Marcus Webb    |
+| caseworker  | priya@caselink.test         | password123 | Priya Nair     |
+| caseworker  | tom@caselink.test           | password123 | Tom Gallagher  |
+| Workspace   | DFES Perth Metro            | —           | —              |
+
+Seed data: 26 cases across Perth suburbs (Subiaco, Kwinana, Kings Park, Scarborough, Canning Vale, Joondalup, Mandurah, Armadale, Balga, Yanchep, Rockingham, Cottesloe, Fremantle, and more), all types/priorities/statuses, realistic descriptions. 41 activity entries giving active cases a history of notes and status changes. 4 active alerts including two geo-pinned. Cases span the last 30 days so the dashboard trend chart shows activity.

@@ -5,6 +5,7 @@ export interface WorkspaceUser {
     name: string;
     email: string;
     role: 'admin' | 'caseworker';
+    isActive: boolean;
 }
 
 export interface MyProfile {
@@ -29,4 +30,8 @@ export function updateMyProfile(name: string) {
 
 export function changePassword(currentPassword: string, newPassword: string) {
     return client.patch('/users/me/password', { currentPassword, newPassword });
+}
+
+export function toggleUserActive(id: string) {
+    return client.patch<WorkspaceUser>(`/users/${id}/active`);
 }

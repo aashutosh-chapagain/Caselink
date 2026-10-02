@@ -5,6 +5,7 @@ import { useAuthStore } from '../stores/auth';
 import { getSocket } from '../api/socket';
 import LocationPicker from '../components/LocationPicker.vue';
 import AlertsMap from '../components/AlertsMap.vue';
+import { formatDateTime } from '../utils/format';
 
 const authStore = useAuthStore();
 
@@ -86,13 +87,6 @@ async function copyPublicLink() {
     await navigator.clipboard.writeText(publicLink);
     copied.value = true;
     setTimeout(() => { copied.value = false; }, 2000);
-}
-
-function formatDateTime(iso: string) {
-    return new Date(iso).toLocaleString('en-AU', {
-        day: 'numeric', month: 'short', year: 'numeric',
-        hour: '2-digit', minute: '2-digit',
-    });
 }
 
 const socket = getSocket();

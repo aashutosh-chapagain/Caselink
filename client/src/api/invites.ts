@@ -15,7 +15,7 @@ export interface InvitePreview {
 }
 
 export const createInvite = (email: string) =>
-    client.post<{ inviteUrl: string }>('/invites', { email });
+    client.post<{ inviteUrl: string; emailSent: boolean }>('/invites', { email });
 
 export const getInvites = () =>
     client.get<Invite[]>('/invites');

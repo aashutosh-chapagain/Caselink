@@ -1,103 +1,145 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useCasesStore } from '../stores/cases';
-import { createCase, type Case, type CasePriority, type CaseType } from '../api/cases';
+import { useAuthStore } from '../stores/auth';
+import { getCases, exportCases, bulkUpdateCases, type Case } from '../api/cases';
+import { getUsers, type WorkspaceUser } from '../api/users';
 import { getSocket } from '../api/socket';
-import LocationPicker from '../components/LocationPicker.vue';
 import CasesMap from '../components/CasesMap.vue';
+import { priorityStyles, priorityLabel, statusStyles, statusLabel, typeLabel, dueBadge } from '../utils/caseStyles';
+import { formatDate } from '../utils/format';
 
 const router = useRouter();
 
 const casesStore = useCasesStore();
+const authStore = useAuthStore();
 
-const showModal = ref(false);
-const submitting = ref(false);
-const modalError = ref('');
-const form = ref({ title: '', description: '', region: '', priority: 'medium' as CasePriority, type: '' as CaseType | '', address: '', lat: 0, lng: 0 });
+const exporting = ref(false);
+const users = ref<WorkspaceUser[]>([]);
 
-const priorityOptions: { label: string; value: CasePriority }[] = [
-    { label: 'Critical', value: 'critical' },
-    { label: 'High', value: 'high' },
-    { label: 'Medium', value: 'medium' },
-    { label: 'Low', value: 'low' },
-];
-
-const caseTypeOptions: { label: string; value: CaseType }[] = [
-    { label: 'Fire', value: 'fire' },
-    { label: 'Medical', value: 'medical' },
-    { label: 'Welfare Check', value: 'welfare_check' },
-    { label: 'Missing Person', value: 'missing_person' },
-    { label: 'Hazmat', value: 'hazmat' },
-    { label: 'Rescue', value: 'rescue' },
-    { label: 'Other', value: 'other' },
-];
-
-function openModal() {
-    form.value = { title: '', description: '', region: '', priority: 'medium', type: '', address: '', lat: 0, lng: 0 };
-    modalError.value = '';
-    showModal.value = true;
-}
-
-function onAddressSelect(selected: { address: string; lat: number; lng: number; region: string }) {
-    form.value.address = selected.address;
-    form.value.lat = selected.lat;
-    form.value.lng = selected.lng;
-    if (selected.region) form.value.region = selected.region;
-}
-
-async function submitCase() {
-    if (!form.value.type) {
-        modalError.value = 'Please select a case type';
-        return;
-    }
-    submitting.value = true;
-    modalError.value = '';
-    try {
-        const { address, lat, lng, ...rest } = form.value;
-        const payload = {
-            ...rest,
-            ...(address && { address, lat, lng }),
-        };
-        await createCase(payload as Parameters<typeof createCase>[0]);
-        showModal.value = false;
-    } catch (err: any) {
-        modalError.value = err.response?.data?.error || 'Failed to create case';
-    } finally {
-        submitting.value = false;
-    }
-}
+// Advanced filters
+const filterType = ref('');
+const filterAssignee = ref('');
+const bulkUpdating = ref(false);
+const selectedIds = ref<Set<string>>(new Set());
 
 const tabs = [
     { label: 'All', value: undefined },
     { label: 'Open', value: 'open' },
     { label: 'In Progress', value: 'in_progress' },
+    { label: 'Overdue', value: 'overdue' },
     { label: 'Closed', value: 'closed' },
     { label: 'Map', value: 'map' },
 ];
 
 const activeTab = ref<string | undefined>(undefined);
 
-const displayedCases = computed(() => {
-    if (activeTab.value === 'closed') return casesStore.closedCases;
-    if (activeTab.value === 'map' || activeTab.value === undefined) return casesStore.activeCases;
-    return casesStore.activeCases.filter(c => c.status === activeTab.value);
+// Search state
+const searchQuery = ref('');
+const searchResults = ref<Case[]>([]);
+const searchLoading = ref(false);
+const isSearching = computed(() => searchQuery.value.trim().length > 0);
+let searchDebounce: ReturnType<typeof setTimeout> | null = null;
+
+watch(searchQuery, (val) => {
+    if (searchDebounce) clearTimeout(searchDebounce);
+    if (!val.trim()) {
+        searchResults.value = [];
+        return;
+    }
+    searchDebounce = setTimeout(async () => {
+        searchLoading.value = true;
+        try {
+            const res = await getCases({ search: val.trim() });
+            searchResults.value = res.data.cases;
+        } catch {
+            searchResults.value = [];
+        } finally {
+            searchLoading.value = false;
+        }
+    }, 300);
 });
 
-const isLoading = computed(() =>
-    activeTab.value === 'closed' ? casesStore.closedLoading : casesStore.loading
+const displayedCases = computed(() => {
+    const now = new Date();
+    const isOverdue = (c: Case) => !!c.dueAt && new Date(c.dueAt) < now;
+
+    let base: Case[];
+    if (isSearching.value) {
+        if (activeTab.value === 'overdue') base = searchResults.value.filter(isOverdue);
+        else if (!activeTab.value || activeTab.value === 'map') base = searchResults.value;
+        else base = searchResults.value.filter(c => c.status === activeTab.value);
+    } else if (activeTab.value === 'overdue') {
+        base = casesStore.activeCases.filter(isOverdue);
+    } else if (activeTab.value === 'closed') {
+        base = casesStore.closedCases;
+    } else if (activeTab.value === 'map' || activeTab.value === undefined) {
+        base = casesStore.activeCases;
+    } else {
+        base = casesStore.activeCases.filter(c => c.status === activeTab.value);
+    }
+
+    if (filterType.value) base = base.filter(c => c.type === filterType.value);
+    if (filterAssignee.value) base = base.filter(c => c.assignedTo?._id === filterAssignee.value);
+
+    return base;
+});
+
+const isLoading = computed(() => {
+    if (isSearching.value) return searchLoading.value;
+    return activeTab.value === 'closed' ? casesStore.closedLoading : casesStore.loading;
+});
+
+const allSelected = computed(() =>
+    displayedCases.value.length > 0 &&
+    displayedCases.value.every(c => selectedIds.value.has(c._id))
+);
+const someSelected = computed(() =>
+    displayedCases.value.some(c => selectedIds.value.has(c._id)) && !allSelected.value
 );
 
 function selectTab(value: string | undefined) {
     activeTab.value = value;
-    if (value === 'closed' && casesStore.closedCases.length === 0) {
+    selectedIds.value = new Set();
+    if (!isSearching.value && value === 'closed' && casesStore.closedCases.length === 0) {
         casesStore.fetchClosedCases();
     }
 }
 
-const mappableCases = computed(() =>
-    casesStore.activeCases.filter(c => c.lat != null && c.lng != null)
-);
+function toggleSelect(id: string) {
+    const next = new Set(selectedIds.value);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    selectedIds.value = next;
+}
+
+function toggleSelectAll() {
+    selectedIds.value = allSelected.value
+        ? new Set()
+        : new Set(displayedCases.value.map(c => c._id));
+}
+
+async function bulkUpdateStatus(status: string) {
+    if (selectedIds.value.size === 0) return;
+    bulkUpdating.value = true;
+    try {
+        await bulkUpdateCases([...selectedIds.value], status);
+        selectedIds.value = new Set();
+    } catch {
+        // silently ignore
+    } finally {
+        bulkUpdating.value = false;
+    }
+}
+
+const mappableCases = computed(() => {
+    const source = isSearching.value ? searchResults.value : casesStore.activeCases;
+    let filtered = source.filter(c => c.lat != null && c.lng != null);
+    if (filterType.value) filtered = filtered.filter(c => c.type === filterType.value);
+    if (filterAssignee.value) filtered = filtered.filter(c => c.assignedTo?._id === filterAssignee.value);
+    return filtered;
+});
 
 const socket = getSocket();
 
@@ -106,6 +148,9 @@ function onCaseUpdated(updated: Case) { casesStore.updateCase(updated); }
 
 onMounted(() => {
     casesStore.fetchActiveCases();
+    if (authStore.isAdmin) {
+        getUsers().then(res => { users.value = res.data; }).catch(() => {});
+    }
     socket.on('case:created', onCaseCreated);
     socket.on('case:updated', onCaseUpdated);
 });
@@ -115,49 +160,31 @@ onUnmounted(() => {
     socket.off('case:updated', onCaseUpdated);
 });
 
-const statusStyles: Record<string, string> = {
-    open: 'bg-blue-100 text-blue-700',
-    in_progress: 'bg-amber-100 text-amber-700',
-    closed: 'bg-gray-100 text-gray-600',
-};
+async function downloadCsv() {
+    exporting.value = true;
+    try {
+        const params: Record<string, string> = {};
+        if (activeTab.value === 'overdue') {
+            params.overdue = 'true';
+        } else if (activeTab.value && activeTab.value !== 'map') {
+            params.status = activeTab.value;
+        }
+        if (isSearching.value) params.search = searchQuery.value.trim();
 
-const statusLabel: Record<string, string> = {
-    open: 'Open',
-    in_progress: 'In Progress',
-    closed: 'Closed',
-};
-
-const priorityStyles: Record<string, string> = {
-    critical: 'bg-red-100 text-red-700',
-    high: 'bg-orange-100 text-orange-700',
-    medium: 'bg-yellow-100 text-yellow-700',
-    low: 'bg-green-100 text-green-700',
-};
-
-const priorityLabel: Record<string, string> = {
-    critical: 'Critical',
-    high: 'High',
-    medium: 'Medium',
-    low: 'Low',
-};
-
-const typeLabel: Record<string, string> = {
-    fire: 'Fire',
-    medical: 'Medical',
-    welfare_check: 'Welfare Check',
-    missing_person: 'Missing Person',
-    hazmat: 'Hazmat',
-    rescue: 'Rescue',
-    other: 'Other',
-};
-
-function formatDate(iso: string) {
-    return new Date(iso).toLocaleDateString('en-AU', {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric',
-    });
+        const res = await exportCases(params);
+        const url = URL.createObjectURL(res.data as Blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `cases-${new Date().toISOString().split('T')[0]}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    } catch {
+        // silently ignore — network errors handled by axios interceptor
+    } finally {
+        exporting.value = false;
+    }
 }
+
 </script>
 
 <template>
@@ -165,11 +192,75 @@ function formatDate(iso: string) {
         <div class="max-w-6xl mx-auto px-6 py-8">
             <div class="flex items-center justify-between mb-6">
                 <h1 class="text-2xl font-bold text-slate-800">Cases</h1>
+                <div class="flex items-center gap-2">
+                    <button
+                        @click="downloadCsv"
+                        :disabled="exporting"
+                        class="text-sm text-slate-600 border border-slate-300 px-4 py-2 rounded-lg hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                    >
+                        {{ exporting ? 'Exporting…' : 'Export CSV' }}
+                    </button>
+                    <button
+                        @click="router.push('/cases/new')"
+                        class="bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                        + New Case
+                    </button>
+                </div>
+            </div>
+
+            <!-- Search -->
+            <div class="relative mb-4">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+                </svg>
+                <input
+                    v-model="searchQuery"
+                    type="text"
+                    placeholder="Search by title, description, region, or address..."
+                    class="w-full border border-slate-300 rounded-lg pl-9 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
                 <button
-                    @click="openModal"
-                    class="bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                    v-if="searchQuery"
+                    @click="searchQuery = ''"
+                    class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    type="button"
                 >
-                    + New Case
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Advanced filters -->
+            <div class="flex items-center gap-2 mb-3 flex-wrap">
+                <select
+                    v-model="filterType"
+                    class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                >
+                    <option value="">All Types</option>
+                    <option value="fire">Fire</option>
+                    <option value="medical">Medical</option>
+                    <option value="welfare_check">Welfare Check</option>
+                    <option value="missing_person">Missing Person</option>
+                    <option value="hazmat">Hazmat</option>
+                    <option value="rescue">Rescue</option>
+                    <option value="other">Other</option>
+                </select>
+                <select
+                    v-if="authStore.isAdmin"
+                    v-model="filterAssignee"
+                    class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                >
+                    <option value="">All Caseworkers</option>
+                    <option v-for="u in users" :key="u._id" :value="u._id">{{ u.name }}</option>
+                </select>
+                <button
+                    v-if="filterType || filterAssignee"
+                    @click="filterType = ''; filterAssignee = ''"
+                    class="text-xs text-slate-500 hover:text-slate-700 px-2 py-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                >
+                    Clear filters
                 </button>
             </div>
 
@@ -225,26 +316,53 @@ function formatDate(iso: string) {
                     <table class="w-full text-sm">
                         <thead class="bg-slate-50 border-b border-slate-200">
                             <tr>
+                                <th class="px-4 py-3 w-8">
+                                    <input
+                                        type="checkbox"
+                                        :checked="allSelected"
+                                        :ref="(el) => { if (el) (el as HTMLInputElement).indeterminate = someSelected; }"
+                                        @change="toggleSelectAll"
+                                        class="rounded border-slate-300 text-blue-600 cursor-pointer"
+                                    />
+                                </th>
                                 <th class="text-left px-4 py-3 font-medium text-slate-600">Title</th>
                                 <th class="text-left px-4 py-3 font-medium text-slate-600">Type</th>
                                 <th class="text-left px-4 py-3 font-medium text-slate-600">Priority</th>
                                 <th class="text-left px-4 py-3 font-medium text-slate-600">Status</th>
+                                <th class="text-left px-4 py-3 font-medium text-slate-600">Due</th>
                                 <th class="text-left px-4 py-3 font-medium text-slate-600">Region</th>
                                 <th class="text-left px-4 py-3 font-medium text-slate-600">Assigned To</th>
-                                <th class="text-left px-4 py-3 font-medium text-slate-600">Created</th>
                             </tr>
                         </thead>
                         <tbody>
                             <tr v-if="displayedCases.length === 0">
-                                <td colspan="7" class="px-4 py-8 text-center text-slate-400">No cases found.</td>
+                                <td colspan="8" class="px-4 py-8 text-center text-slate-400">
+                                    {{ isSearching ? `No cases found matching "${searchQuery}".` : 'No cases found.' }}
+                                </td>
                             </tr>
                             <tr
                                 v-for="c in displayedCases"
                                 :key="c._id"
                                 class="border-b border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer"
+                                :class="selectedIds.has(c._id) ? 'bg-blue-50 hover:bg-blue-50' : ''"
                                 @click="$router.push(`/cases/${c._id}`)"
                             >
-                                <td class="px-4 py-3 font-medium text-slate-800">{{ c.title }}</td>
+                                <td class="px-4 py-3 w-8" @click.stop>
+                                    <input
+                                        type="checkbox"
+                                        :checked="selectedIds.has(c._id)"
+                                        @change="toggleSelect(c._id)"
+                                        class="rounded border-slate-300 text-blue-600 cursor-pointer"
+                                    />
+                                </td>
+                                <td class="px-4 py-3">
+                                    <span class="font-medium text-slate-800">{{ c.title }}</span>
+                                    <span
+                                        v-if="dueBadge(c.dueAt)"
+                                        class="block text-xs font-medium mt-0.5"
+                                        :class="dueBadge(c.dueAt)!.cls"
+                                    >{{ dueBadge(c.dueAt)!.label }}</span>
+                                </td>
                                 <td class="px-4 py-3 text-slate-600 text-xs">{{ typeLabel[c.type] ?? c.type }}</td>
                                 <td class="px-4 py-3">
                                     <span
@@ -262,15 +380,17 @@ function formatDate(iso: string) {
                                         {{ statusLabel[c.status] }}
                                     </span>
                                 </td>
+                                <td class="px-4 py-3 text-xs text-slate-500">
+                                    {{ c.dueAt ? formatDate(c.dueAt) : '—' }}
+                                </td>
                                 <td class="px-4 py-3 text-slate-600">{{ c.region }}</td>
                                 <td class="px-4 py-3 text-slate-600">{{ c.assignedTo?.name ?? '—' }}</td>
-                                <td class="px-4 py-3 text-slate-500">{{ formatDate(c.createdAt) }}</td>
                             </tr>
                         </tbody>
                     </table>
 
-                    <!-- Load more (closed tab only) -->
-                    <div v-if="activeTab === 'closed' && casesStore.closedHasMore" class="px-4 py-3 border-t border-slate-100 text-center">
+                    <!-- Load more (closed tab only, not during search) -->
+                    <div v-if="!isSearching && activeTab === 'closed' && casesStore.closedHasMore" class="px-4 py-3 border-t border-slate-100 text-center">
                         <button
                             @click="casesStore.loadMoreClosed()"
                             :disabled="casesStore.closedLoading"
@@ -285,95 +405,44 @@ function formatDate(iso: string) {
         </div>
     </div>
 
-    <!-- Create case modal -->
-    <div v-if="showModal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50" @click.self="showModal = false">
-        <div class="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6">
-            <h2 class="text-lg font-semibold text-slate-800 mb-4">New Case</h2>
-
-            <form @submit.prevent="submitCase" class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-slate-600 mb-1">Title</label>
-                    <input
-                        v-model="form.title"
-                        type="text"
-                        required
-                        class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
-                        placeholder="Case title"
-                    />
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-slate-600 mb-1">Description</label>
-                    <textarea
-                        v-model="form.description"
-                        required
-                        rows="3"
-                        class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm resize-none"
-                        placeholder="Brief description"
-                    />
-                </div>
-                <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <label class="block text-sm font-medium text-slate-600 mb-1">Case Type</label>
-                        <select
-                            v-model="form.type"
-                            required
-                            class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-700"
-                        >
-                            <option value="" disabled>Select type…</option>
-                            <option v-for="opt in caseTypeOptions" :key="opt.value" :value="opt.value">
-                                {{ opt.label }}
-                            </option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-slate-600 mb-1">Priority</label>
-                        <select
-                            v-model="form.priority"
-                            required
-                            class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-700"
-                        >
-                            <option v-for="opt in priorityOptions" :key="opt.value" :value="opt.value">
-                                {{ opt.label }}
-                            </option>
-                        </select>
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-slate-600 mb-1">Region</label>
-                    <input
-                        v-model="form.region"
-                        type="text"
-                        required
-                        class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
-                        placeholder="e.g. Perth Metro"
-                    />
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-slate-600 mb-1">
-                        Address <span class="text-slate-400 font-normal">(optional)</span>
-                    </label>
-                    <LocationPicker @select="onAddressSelect" />
-                </div>
-
-                <p v-if="modalError" class="text-red-600 text-sm">{{ modalError }}</p>
-
-                <div class="flex justify-end gap-2 pt-2">
-                    <button
-                        type="button"
-                        @click="showModal = false"
-                        class="px-4 py-2 text-sm text-slate-600 hover:text-slate-800 transition-colors"
-                    >
-                        Cancel
-                    </button>
-                    <button
-                        type="submit"
-                        :disabled="submitting"
-                        class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                    >
-                        {{ submitting ? 'Creating...' : 'Create Case' }}
-                    </button>
-                </div>
-            </form>
+    <!-- Bulk action bar -->
+    <Transition
+        enter-active-class="transition ease-out duration-150"
+        enter-from-class="opacity-0 translate-y-3"
+        enter-to-class="opacity-100 translate-y-0"
+        leave-active-class="transition ease-in duration-100"
+        leave-from-class="opacity-100 translate-y-0"
+        leave-to-class="opacity-0 translate-y-3"
+    >
+        <div
+            v-if="selectedIds.size > 0"
+            class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white rounded-xl shadow-xl px-5 py-3 flex items-center gap-4 z-40 whitespace-nowrap"
+        >
+            <span class="text-sm font-medium">{{ selectedIds.size }} selected</span>
+            <div class="w-px h-4 bg-slate-600 shrink-0"></div>
+            <div class="flex items-center gap-2">
+                <button
+                    @click="bulkUpdateStatus('open')"
+                    :disabled="bulkUpdating"
+                    class="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-500 hover:bg-blue-400 disabled:opacity-50 transition-colors"
+                >Open</button>
+                <button
+                    @click="bulkUpdateStatus('in_progress')"
+                    :disabled="bulkUpdating"
+                    class="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 transition-colors"
+                >In Progress</button>
+                <button
+                    @click="bulkUpdateStatus('closed')"
+                    :disabled="bulkUpdating"
+                    class="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-600 hover:bg-slate-500 disabled:opacity-50 transition-colors"
+                >Closed</button>
+            </div>
+            <div class="w-px h-4 bg-slate-600 shrink-0"></div>
+            <button
+                @click="selectedIds = new Set()"
+                class="text-xs text-slate-400 hover:text-white transition-colors"
+            >✕ Clear</button>
         </div>
-    </div>
+    </Transition>
+
 </template>
