@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 import authRoutes from './routes/auth';
 import caseRoutes from './routes/cases';
 import activityRoutes from './routes/activities';
@@ -9,10 +10,22 @@ import alertRoutes from './routes/alerts';
 import inviteRoutes from './routes/invites';
 import notificationRoutes from './routes/notifications';
 
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    message: { error: 'Too many attempts, please try again later' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: () => process.env.NODE_ENV === 'test',
+});
+
 export function createApp() {
     const app = express();
     app.use(cors());
     app.use(express.json());
+
+    app.use('/api/v1/auth/login', authLimiter);
+    app.use('/api/v1/auth/register', authLimiter);
 
     app.use('/api/v1/auth', authRoutes);
     app.use('/api/v1/users', userRoutes);
