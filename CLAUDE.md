@@ -39,6 +39,7 @@ Caselink is a case management platform for emergency services / social work team
 | Case linking | Done | Bidirectional related-case associations; searchable from detail view; activity-logged on both sides |
 | Overdue escalation notifications | Done | Daily 08:00 cron notifies assignee + all admins when dueAt passes; fires once per case; resets if due date changes |
 | Email — invite delivery | Done | Resend sends invite email on creation; `emailSent` flag in response; copy-link fallback always shown |
+| Rate limiting | Done | 10 requests / 15 min per IP on login + register; skipped in test environment |
 | Advanced case filtering | Done | Type + assignee dropdowns in CaseListView; compose with search and tab filters; assignee filter admin-only |
 | Dashboard date range | Done | 7d/30d/90d preset selector; controls trend chart period and closed-in-period count |
 | Case history / SLA view | Done | Status timeline with durations in CaseDetailView; SLA badge (Met/Missed/On Track/Overdue) when due date set |
@@ -579,6 +580,19 @@ Client (`CaseDetailView`): Related Cases card sits between the metadata grid and
 
 `PATCH /cases/:id` now accepts `priority` and `type` with the same validation as case creation. Changes are activity-logged as type `update` with the old and new values: `"Priority changed from high to critical"`, `"Type changed from fire to rescue"` (underscores replaced with spaces for readability). `startEdit()` in CaseDetailView populates `editPriority` and `editType` refs; `saveEdit()` always sends both fields so they're never accidentally cleared.
 
+### Rate limiting
+
+`express-rate-limit` is applied in `app.ts` to the two public auth endpoints before the auth router is mounted:
+
+```
+POST /api/v1/auth/login     — 10 requests per IP per 15 minutes
+POST /api/v1/auth/register  — 10 requests per IP per 15 minutes
+```
+
+Returns `429 Too Many Requests` with `{ error: 'Too many attempts, please try again later' }` once the limit is exceeded. `standardHeaders: true` adds `RateLimit-*` headers to responses; `legacyHeaders: false` suppresses the older `X-RateLimit-*` headers.
+
+The limiter uses in-memory storage (no Redis required). `skip: () => process.env.NODE_ENV === 'test'` disables it during Vitest runs — all test requests share the same loopback IP and would exhaust the counter immediately otherwise.
+
 ### Email — invite delivery
 
 **Provider**: Resend (`npm install resend` in `server/`). Utility at `server/src/utils/email.ts`.
@@ -661,6 +675,8 @@ The REST API is intentionally structured for reuse by a future React Native clie
 - **Overdue cron is wired in `index.ts`, not `app.ts`** — tests import `app.ts` directly and never run the cron. Any cron or scheduled job must live in `index.ts` to stay out of the test environment.
 - **`checkOverdueCases` receives the `io` instance as a parameter** — it cannot call `app.get('io')` because it has no access to the Express app. `index.ts` passes `io` directly when scheduling the cron.
 - **Notification type enum includes `'overdue'`** — added alongside `'assignment'`. Client notification UI renders `notification.message` for all types; no client changes are needed when adding new notification types as long as the message is self-explanatory.
+- **Rate limiter must skip in tests** — all Vitest requests originate from the same loopback IP; without `skip: () => process.env.NODE_ENV === 'test'` the counter exhausts after 10 requests and every subsequent auth test fails with 429.
+- **Rate limiter middleware must be mounted before the auth router** — `app.use('/api/v1/auth/login', authLimiter)` must appear before `app.use('/api/v1/auth', authRoutes)` or Express never reaches the limiter for those paths.
 - **Resend client must be instantiated lazily** — `new Resend(key)` throws if the key is `undefined`. Since `dotenv.config()` runs in `index.ts` at startup, any module-level `new Resend(process.env.RESEND_API_KEY)` will crash on import before the env is loaded. Always construct the client inside the function after checking the key exists.
 - **`closedThisMonth` renamed to `closedInPeriod`** — both the server response field and the `DashboardStats` interface use `closedInPeriod`. Any code referencing the old name will fail silently (TypeScript will catch it at build time).
 - **Dashboard `days` param is whitelist-validated** — only `[7, 30, 90]` are accepted; any other value (including 14, 60, etc.) silently falls back to 7. Do not add intermediate values without updating the whitelist.
