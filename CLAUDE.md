@@ -682,7 +682,42 @@ The REST API is intentionally structured for reuse by a future React Native clie
 - **Dashboard `days` param is whitelist-validated** — only `[7, 30, 90]` are accepted; any other value (including 14, 60, etc.) silently falls back to 7. Do not add intermediate values without updating the whitelist.
 - **`statusHistory` uses loaded activities only** — if `activitiesHasMore` is true, early status changes are not loaded and the timeline is incomplete. The view shows a warning in that case. To get the full history, load older activities first.
 - **`filterType` / `filterAssignee` are client-side only** — applied in `displayedCases` and `mappableCases` computed properties, after server fetch. The CSV export route does not receive them and exports all matching rows ignoring these filters.
-- **Assignee filter users are fetched only for admins** — `getUsers()` is called on mount in `CaseListView` only when `authStore.isAdmin`. The `users` ref stays empty for caseworkers, and the assignee dropdown is hidden entirely via `v-if="authStore.isAdmin"`.
+- **Assignee filter users are fetched only for admins**
+- **Vercel env vars require a redeploy to take effect** — `VITE_API_URL` and any other `VITE_*` variables are baked into the JS bundle at build time. Saving a new value in Vercel settings does nothing until the project is redeployed.
+- **`client/vercel.json` is required for Vue Router** — without it, any URL other than `/` returns 404 on Vercel because it looks for a file at that path. The rewrite rule sends all requests to `index.html` so Vue Router can handle them.
+- **Render uses dynamic IPs** — MongoDB Atlas IP whitelist must be set to `0.0.0.0/0` (allow all). A specific IP will break on the next Render deploy. Atlas still requires valid credentials so this is not insecure.
+- **Render free tier cold starts** — the server spins down after 15 minutes of inactivity. The first request after that takes ~30 seconds. Upgrade to paid ($7/month) to keep it always on.
+- **Mixed content blocks HTTP APIs from HTTPS pages** — browsers block `https://` frontends from calling `http://` backends. EC2 without a domain can only serve HTTP, making it incompatible with Vercel. Render solves this by providing HTTPS automatically. — `getUsers()` is called on mount in `CaseListView` only when `authStore.isAdmin`. The `users` ref stays empty for caseworkers, and the assignee dropdown is hidden entirely via `v-if="authStore.isAdmin"`.
+
+---
+
+## Deployment
+
+### Architecture
+
+| Layer | Service | URL | Cost |
+|---|---|---|---|
+| Client | Vercel | `https://<project>.vercel.app` | Free forever |
+| Server | Render | `https://caselink-raw9.onrender.com` | Free (cold starts after 15min inactivity) |
+| Database | MongoDB Atlas M0 | — | Free forever |
+
+### Vercel (client)
+
+- Root directory: `client/`, framework: Vite, build: `npm run build`, output: `dist`
+- **`client/vercel.json`** — required for Vue Router history mode; without it any direct URL or page refresh returns 404
+- **`VITE_API_URL`** env var must be set to the Render URL (`https://caselink-raw9.onrender.com/api/v1`) before deploying
+- Changing env vars requires a redeploy — Vite bakes them into the bundle at build time, a refresh is not enough
+
+### Render (server)
+
+- Root directory: `server`, build: `npm install`, start: `npm run dev`
+- **MongoDB Atlas IP whitelist must allow `0.0.0.0/0`** — Render uses dynamic IPs that change on every deploy; whitelisting a specific IP will break on the next deploy
+- Render sets `PORT` dynamically via env var — do not hardcode a port in the Render env vars; the server already reads `process.env.PORT`
+- Free tier spins down after 15 minutes of inactivity; first request after that takes ~30 seconds to cold start
+
+### EC2 (not in use)
+
+A t3.micro Ubuntu instance was set up but replaced by Render because EC2 on plain `http://` cannot be called from the Vercel `https://` frontend (browser mixed content policy). EC2 would need a domain + Nginx + Let's Encrypt to serve over HTTPS.
 
 ---
 
